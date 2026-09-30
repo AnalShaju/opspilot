@@ -1,69 +1,85 @@
-import Image from "next/image";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+import { getActiveIncidents, incidents } from "@/data/incidents";
+import { services } from "@/data/services";
+import { cn } from "@/lib/utils";
 
-export default function Home() {
+const shortNames: Record<string, string> = {
+  "api-gateway": "API",
+  users: "Users",
+  orders: "Orders",
+  payment: "Payments",
+  database: "Database",
+};
+
+export default function OverviewPage() {
+  const active = getActiveIncidents()[0] ?? incidents[0];
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="mx-auto flex max-w-3xl flex-col justify-center gap-10 py-6 lg:py-12">
+      <header>
+        <div className="section-label">Production</div>
+        <h2 className="display mt-3 text-[40px] text-ink md:text-[48px]">
+          {active.service} is failing
+        </h2>
+        <p className="mt-3 text-[17px] text-muted">{active.summary}</p>
+      </header>
+
+      <section className="panel overflow-hidden">
+        <div className="border-b border-line px-6 py-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center border border-critical/25 bg-critical-soft px-1.5 py-0.5 text-[10.5px] font-medium text-critical">
+              Critical
+            </span>
+            <span className="mono text-[11px] text-faint">{active.code}</span>
+          </div>
+          <p className="mt-4 text-[14px] text-ink-soft">
+            OpsPilot detected the failure and is ready to investigate.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="px-6 py-5">
+          <Link
+            href={`/incidents/${active.id}`}
+            className="inline-flex items-center gap-2 bg-accent px-4 py-2.5 text-[14px] font-medium text-white transition-colors duration-150 hover:bg-[#ea580c]"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Investigate Incident
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
-      </main>
+      </section>
+
+      <section>
+        <div className="section-label mb-3">Services</div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {services.map((service) => {
+            const critical = service.status === "critical";
+            return (
+              <Link
+                key={service.id}
+                href={
+                  service.incidentId
+                    ? `/incidents/${service.incidentId}`
+                    : "/services"
+                }
+                className="inline-flex items-center gap-2 text-[13px] text-ink-soft transition-colors duration-150 hover:text-ink"
+              >
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    critical
+                      ? "bg-critical animate-pulse-dot"
+                      : "bg-healthy",
+                  )}
+                  aria-hidden
+                />
+                <span className={critical ? "text-critical" : undefined}>
+                  {shortNames[service.id] ?? service.name}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
