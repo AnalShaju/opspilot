@@ -8,11 +8,12 @@ import type { Incident } from "@/lib/types/incident";
 import { cn } from "@/lib/utils";
 
 const serviceDots = [
-  { id: "api", label: "API", failing: false },
-  { id: "users", label: "Users", failing: false },
-  { id: "orders", label: "Orders", failing: false },
-  { id: "payments", label: "Payments", failing: true },
-  { id: "database", label: "Database", failing: false },
+  { id: "api", label: "API", match: "API Gateway" },
+  { id: "users", label: "Users", match: "Users Service" },
+  { id: "orders", label: "Orders", match: "Orders Service" },
+  { id: "payments", label: "Payments", match: "Payment Service" },
+  { id: "database", label: "Database", match: "Database" },
+  { id: "redis", label: "Redis", match: "Redis" },
 ];
 
 export default function OverviewPage() {
@@ -107,7 +108,7 @@ export default function OverviewPage() {
         <div className="section-label mb-3">Services</div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           {serviceDots.map((service) => {
-            const failing = service.failing && !isResolved;
+            const failing = !isResolved && incident.service === service.match;
             return (
               <span
                 key={service.id}

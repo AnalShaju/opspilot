@@ -13,14 +13,18 @@ Next.js API (/api/incidents/...)
    ↓
 Incident Service
    ↓
-DeepSeek Incident Agent
+Evidence collection (simulator HTTP APIs)
    ↓
-Controlled Tools (getLogs, getDeployments, ...)
+ONE DeepSeek diagnosis call
    ↓
-Simulator (SIMULATOR_URL)
+Human approval
+   ↓
+Backend remediation + health verification
+   ↓
+Supabase / in-memory history
 ```
 
-Human approval is required before any rollback.
+Human approval is required before any remediation. DeepSeek never executes actions.
 
 ## Environment
 
@@ -57,11 +61,11 @@ Open http://localhost:3000
 
 ## Demo flow
 
-1. Reset / fail Payment Service in the simulator
+1. Reset / trigger a scenario in the simulator (Payment is the default demo)
 2. Open OpsPilot overview → **Investigate Incident**
-3. DeepSeek calls tools and returns root cause + rollback recommendation
+3. OpsPilot collects evidence, then DeepSeek returns one diagnosis (root cause + recommended action)
 4. Click **Approve & Fix**
-5. Backend rolls back via simulator and verifies health
+5. Backend runs the approved remediation via the simulator and verifies health
 6. Incident resolves → report available
 
 ## API
@@ -71,11 +75,11 @@ Open http://localhost:3000
 | POST | `/api/demo/bootstrap` | Ensure demo incident exists |
 | GET/POST | `/api/incidents` | List / create |
 | GET | `/api/incidents/:id` | Get one |
-| POST | `/api/incidents/:id/investigate` | DeepSeek tool-calling investigation |
-| POST | `/api/incidents/:id/approve` | Human approval → rollback → verify |
+| POST | `/api/incidents/:id/investigate` | Collect evidence + one DeepSeek diagnosis |
+| POST | `/api/incidents/:id/approve` | Human approval → remediate → verify |
 | GET | `/api/incidents/:id/report` | Structured report |
 
-## Tools (AI-readable only)
+## Evidence tools (backend-only)
 
 - `getServices` → `GET /services`
 - `getLogs` → `GET /logs`
@@ -85,7 +89,9 @@ Open http://localhost:3000
 
 ## Remediation (human-approved only)
 
-- `rollbackDeployment(version)` → `POST /actions/rollback`
+- `rollbackDeployment` → `POST /actions/rollback`
+- `restartRedis` → `POST /actions/restart-redis`
+- `recoverDatabase` → `POST /actions/recover-database`
 - `verifyHealth()` → `GET /health`
 
 ## Test
@@ -97,6 +103,6 @@ npm run test:api
 ## Safety
 
 - `DEEPSEEK_API_KEY` is server-only
-- Browser never calls rollback directly
-- AI cannot invent remediations outside allowlisted `rollback`
+- Browser never calls remediation directly
+- AI cannot invent remediations outside the allowlisted actions
 - AI output is validated before storage

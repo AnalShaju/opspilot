@@ -1,51 +1,45 @@
 /**
- * Supabase implementation of ResilienceTestRepository.
- * Also writes resilience_test_results when a run finishes.
+ * Supabase resilience_tests + resilience_test_results (LIVE schema).
+ *
+ * resilience_tests uses uuid `id` (exposed as testId), overall `status`,
+ * and stage columns limited to pending|success|failed.
  */
 
 import type { ResilienceTestRepository } from "@/lib/repositories/resilience-test.repository";
+import { getScenario } from "@/lib/resilience/scenarios";
 import { requireRow, throwStorageError } from "@/lib/supabase/errors";
-import { cloneJson, nextPrefixedId } from "@/lib/supabase/helpers";
+import {
+  msToSeconds,
+  approvalStageFromDb,
+  approvalStageToDb,
+  overallFromDb,
+  overallToDb,
+  secondsToMs,
+  stageFromDb,
+  stageToDb,
+} from "@/lib/supabase/status-map";
 import { getSupabaseAdmin, type OpsPilotSupabase } from "@/lib/supabase/server";
+import type { ActionType, IncidentType } from "@/lib/types/incident";
 import type {
-  ResilienceEvaluation,
-  ResilienceOverallStatus,
   ResilienceScenarioId,
   ResilienceTest,
-  StageStatus,
 } from "@/lib/types/resilience";
-import type { ActionType, IncidentType } from "@/lib/types/incident";
 
 type TestRow = {
-  test_id: string;
+  id: string;
   scenario: string;
-  scenario_name: string;
-  started_at: string;
-  completed_at: string | null;
   incident_id: string | null;
-  detection_status: string;
-  investigation_status: string;
-  recommendation_status: string;
-  approval_status: string;
-  remediation_status: string;
-  verification_status: string;
-  overall_status: string;
-  recovery_duration_ms: number | null;
+  status: string;
+  detection_status: string | null;
+  investigation_status: string | null;
+  approval_status: string | null;
+  remediation_status: string | null;
+  verification_status: string | null;
+  recovery_duration_seconds: number | null;
   failure_reason: string | null;
-  triggered_at: string | null;
-  detected_at: string | null;
-  investigation_completed_at: string | null;
-  approved_at: string | null;
-  remediated_at: string | null;
-  verified_at: string | null;
-  root_cause_summary: string | null;
-  confidence: number | null;
-  recommended_action_type: string | null;
-  recommended_action_target: string | null;
-  remediation_result: string | null;
-  verification_result: string | null;
-  evaluation: ResilienceEvaluation;
-  approval_timeout_ms: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
 };
 
 const EXPECTED_SERVICE: Record<string, string> = {
@@ -55,81 +49,71 @@ const EXPECTED_SERVICE: Record<string, string> = {
   DATABASE_CONNECTION_EXHAUSTION: "Database",
 };
 
-function toRow(test: ResilienceTest): TestRow {
+function fromRow(row: TestRow): ResilienceTest {
+  const scenario = getScenario(row.scenario);
+  const overallStatus = overallFromDb(row.status, row.failure_reason);
+  const investigationStatus = stageFromDb(row.investigation_status);
+
   return {
-    test_id: test.testId,
-    scenario: test.scenario,
-    scenario_name: test.scenarioName,
-    started_at: test.startedAt,
-    completed_at: test.completedAt,
-    incident_id: test.incidentId,
-    detection_status: test.detectionStatus,
-    investigation_status: test.investigationStatus,
-    recommendation_status: test.recommendationStatus,
-    approval_status: test.approvalStatus,
-    remediation_status: test.remediationStatus,
-    verification_status: test.verificationStatus,
-    overall_status: test.overallStatus,
-    recovery_duration_ms: test.recoveryDurationMs,
-    failure_reason: test.failureReason,
-    triggered_at: test.triggeredAt,
-    detected_at: test.detectedAt,
-    investigation_completed_at: test.investigationCompletedAt,
-    approved_at: test.approvedAt,
-    remediated_at: test.remediatedAt,
-    verified_at: test.verifiedAt,
-    root_cause_summary: test.rootCauseSummary,
-    confidence: test.confidence,
-    recommended_action_type: test.recommendedActionType,
-    recommended_action_target: test.recommendedActionTarget,
-    remediation_result: test.remediationResult,
-    verification_result: test.verificationResult,
-    evaluation: cloneJson(test.evaluation),
-    approval_timeout_ms: test.approvalTimeoutMs,
+    testId: row.id,
+    scenario: row.scenario as ResilienceScenarioId,
+    scenarioName: scenario?.name ?? row.scenario,
+    startedAt: row.started_at ?? row.created_at,
+    completedAt: row.completed_at,
+    incidentId: row.incident_id,
+    detectionStatus: stageFromDb(row.detection_status),
+    investigationStatus,
+    recommendationStatus:
+      investigationStatus === "passed"
+        ? "passed"
+        : investigationStatus === "failed"
+          ? "skipped"
+          : investigationStatus,
+    approvalStatus: approvalStageFromDb(row.approval_status),
+    remediationStatus: stageFromDb(row.remediation_status),
+    verificationStatus: stageFromDb(row.verification_status),
+    overallStatus,
+    recoveryDurationMs: secondsToMs(row.recovery_duration_seconds),
+    failureReason: row.failure_reason,
+    triggeredAt: row.started_at,
+    detectedAt: null,
+    investigationCompletedAt: null,
+    approvedAt: null,
+    remediatedAt: null,
+    verifiedAt: null,
+    rootCauseSummary: null,
+    confidence: null,
+    recommendedActionType: null,
+    recommendedActionTarget: null,
+    remediationResult: null,
+    verificationResult: null,
+    evaluation: {
+      expectedIncidentType: scenario?.expectedIncidentType ?? "unknown",
+      expectedActionType: scenario?.expectedActionType ?? "rollback",
+      actualIncidentType: null,
+      actualActionType: null,
+      incidentTypeMatched: null,
+      actionTypeMatched: null,
+    },
+    approvalTimeoutMs: 10 * 60 * 1000,
   };
 }
 
-function fromRow(row: TestRow): ResilienceTest {
+function toRow(test: ResilienceTest): Record<string, unknown> {
   return {
-    testId: row.test_id,
-    scenario: row.scenario as ResilienceScenarioId,
-    scenarioName: row.scenario_name,
-    startedAt: row.started_at,
-    completedAt: row.completed_at,
-    incidentId: row.incident_id,
-    detectionStatus: row.detection_status as StageStatus,
-    investigationStatus: row.investigation_status as StageStatus,
-    recommendationStatus: row.recommendation_status as StageStatus,
-    approvalStatus: row.approval_status as StageStatus,
-    remediationStatus: row.remediation_status as StageStatus,
-    verificationStatus: row.verification_status as StageStatus,
-    overallStatus: row.overall_status as ResilienceOverallStatus,
-    recoveryDurationMs: row.recovery_duration_ms,
-    failureReason: row.failure_reason,
-    triggeredAt: row.triggered_at,
-    detectedAt: row.detected_at,
-    investigationCompletedAt: row.investigation_completed_at,
-    approvedAt: row.approved_at,
-    remediatedAt: row.remediated_at,
-    verifiedAt: row.verified_at,
-    rootCauseSummary: row.root_cause_summary,
-    confidence: row.confidence,
-    recommendedActionType: row.recommended_action_type as ActionType | null,
-    recommendedActionTarget: row.recommended_action_target,
-    remediationResult: row.remediation_result,
-    verificationResult: row.verification_result,
-    evaluation: {
-      expectedIncidentType: row.evaluation
-        .expectedIncidentType as IncidentType,
-      expectedActionType: row.evaluation.expectedActionType as ActionType,
-      actualIncidentType:
-        (row.evaluation.actualIncidentType as IncidentType | null) ?? null,
-      actualActionType:
-        (row.evaluation.actualActionType as ActionType | null) ?? null,
-      incidentTypeMatched: row.evaluation.incidentTypeMatched ?? null,
-      actionTypeMatched: row.evaluation.actionTypeMatched ?? null,
-    },
-    approvalTimeoutMs: row.approval_timeout_ms,
+    id: test.testId,
+    scenario: test.scenario,
+    incident_id: test.incidentId,
+    status: overallToDb(test.overallStatus),
+    detection_status: stageToDb(test.detectionStatus),
+    investigation_status: stageToDb(test.investigationStatus),
+    approval_status: approvalStageToDb(test.approvalStatus),
+    remediation_status: stageToDb(test.remediationStatus),
+    verification_status: stageToDb(test.verificationStatus),
+    recovery_duration_seconds: msToSeconds(test.recoveryDurationMs),
+    failure_reason: test.failureReason,
+    started_at: test.startedAt,
+    completed_at: test.completedAt,
   };
 }
 
@@ -158,6 +142,12 @@ function buildResultPayload(test: ResilienceTest) {
       recoveryDurationMs: test.recoveryDurationMs,
       incidentId: test.incidentId,
       evaluation: test.evaluation,
+      scenarioName: test.scenarioName,
+      rootCauseSummary: test.rootCauseSummary,
+      confidence: test.confidence,
+      recommendedActionTarget: test.recommendedActionTarget,
+      remediationResult: test.remediationResult,
+      verificationResult: test.verificationResult,
       stages: {
         detection: test.detectionStatus,
         investigation: test.investigationStatus,
@@ -166,11 +156,85 @@ function buildResultPayload(test: ResilienceTest) {
         remediation: test.remediationStatus,
         verification: test.verificationStatus,
       },
-      rootCauseSummary: test.rootCauseSummary,
-      confidence: test.confidence,
-      remediationResult: test.remediationResult,
-      verificationResult: test.verificationResult,
+      timestamps: {
+        triggeredAt: test.triggeredAt,
+        detectedAt: test.detectedAt,
+        investigationCompletedAt: test.investigationCompletedAt,
+        approvedAt: test.approvedAt,
+        remediatedAt: test.remediatedAt,
+        verifiedAt: test.verifiedAt,
+      },
     },
+  };
+}
+
+function applyResultDetails(
+  test: ResilienceTest,
+  details: Record<string, unknown> | null,
+): ResilienceTest {
+  if (!details) return test;
+  const evaluation = details.evaluation as ResilienceTest["evaluation"] | undefined;
+  const stages = details.stages as Record<string, string> | undefined;
+  const timestamps = details.timestamps as Record<string, string | null> | undefined;
+
+  return {
+    ...test,
+    scenarioName:
+      typeof details.scenarioName === "string"
+        ? details.scenarioName
+        : test.scenarioName,
+    rootCauseSummary:
+      typeof details.rootCauseSummary === "string"
+        ? details.rootCauseSummary
+        : test.rootCauseSummary,
+    confidence:
+      typeof details.confidence === "number" ? details.confidence : test.confidence,
+    recommendedActionType:
+      (details.evaluation as { actualActionType?: ActionType } | undefined)
+        ?.actualActionType ??
+      (typeof (details as { recommendedActionType?: string }).recommendedActionType ===
+      "string"
+        ? ((details as { recommendedActionType?: string })
+            .recommendedActionType as ActionType)
+        : test.recommendedActionType),
+    recommendedActionTarget:
+      typeof details.recommendedActionTarget === "string"
+        ? details.recommendedActionTarget
+        : test.recommendedActionTarget,
+    remediationResult:
+      typeof details.remediationResult === "string"
+        ? details.remediationResult
+        : test.remediationResult,
+    verificationResult:
+      typeof details.verificationResult === "string"
+        ? details.verificationResult
+        : test.verificationResult,
+    evaluation: evaluation
+      ? {
+          ...test.evaluation,
+          ...evaluation,
+          expectedIncidentType: evaluation.expectedIncidentType as IncidentType,
+          expectedActionType: evaluation.expectedActionType as ActionType,
+          actualIncidentType: evaluation.actualIncidentType as IncidentType | null,
+          actualActionType: evaluation.actualActionType as ActionType | null,
+        }
+      : test.evaluation,
+    triggeredAt: timestamps?.triggeredAt ?? test.triggeredAt,
+    detectedAt: timestamps?.detectedAt ?? test.detectedAt,
+    investigationCompletedAt:
+      timestamps?.investigationCompletedAt ?? test.investigationCompletedAt,
+    approvedAt: timestamps?.approvedAt ?? test.approvedAt,
+    remediatedAt: timestamps?.remediatedAt ?? test.remediatedAt,
+    verifiedAt: timestamps?.verifiedAt ?? test.verifiedAt,
+    recommendationStatus: stages?.recommendation
+      ? stageFromDb(
+          stages.recommendation === "passed"
+            ? "success"
+            : stages.recommendation === "failed"
+              ? "failed"
+              : "pending",
+        )
+      : test.recommendationStatus,
   };
 }
 
@@ -184,51 +248,98 @@ export class SupabaseResilienceTestRepository
   }
 
   async nextTestId(): Promise<string> {
-    return nextPrefixedId(this.client, "resilience_tests", "test_id", "RT");
+    return crypto.randomUUID();
   }
 
   async saveTest(test: ResilienceTest): Promise<ResilienceTest> {
-    const row = {
-      ...toRow(test),
-      updated_at: new Date().toISOString(),
-    };
-
     const { data, error } = await this.client
       .from("resilience_tests")
-      .upsert(row, { onConflict: "test_id" })
+      .upsert(toRow(test), { onConflict: "id" })
       .select("*")
       .single();
 
     const saved = fromRow(
-      requireRow(`saving resilience test ${test.testId}`, data as TestRow | null, error),
+      requireRow(
+        `saving resilience test ${test.testId}`,
+        data as TestRow | null,
+        error,
+      ),
     );
 
-    if (saved.overallStatus !== "running") {
-      await this.persistResult(saved);
-    }
+    // Always upsert results details so mid-run timestamps/evaluation survive.
+    await this.persistResult({ ...test, testId: saved.testId });
 
-    return saved;
+    return this.attachResultDetails({
+      ...test,
+      testId: saved.testId,
+      overallStatus: saved.overallStatus,
+    });
   }
 
   private async persistResult(test: ResilienceTest): Promise<void> {
+    const payload = buildResultPayload(test);
+    const { data: existing, error: findError } = await this.client
+      .from("resilience_test_results")
+      .select("id")
+      .eq("test_id", test.testId)
+      .maybeSingle();
+
+    if (findError) {
+      throwStorageError(`looking up resilience result ${test.testId}`, findError);
+    }
+
+    if (existing?.id) {
+      const { error } = await this.client
+        .from("resilience_test_results")
+        .update(payload)
+        .eq("id", existing.id);
+      if (error) {
+        throwStorageError(`updating resilience result ${test.testId}`, error);
+      }
+      return;
+    }
+
     const { error } = await this.client
       .from("resilience_test_results")
-      .upsert(buildResultPayload(test), { onConflict: "test_id" });
+      .insert(payload);
+    if (error) {
+      throwStorageError(`inserting resilience result ${test.testId}`, error);
+    }
+  }
+
+  private async attachResultDetails(test: ResilienceTest): Promise<ResilienceTest> {
+    const { data, error } = await this.client
+      .from("resilience_test_results")
+      .select("details, actual_action, actual_service")
+      .eq("test_id", test.testId)
+      .maybeSingle();
 
     if (error) {
-      throwStorageError(`saving resilience result for ${test.testId}`, error);
+      throwStorageError(`loading resilience result ${test.testId}`, error);
     }
+
+    const details =
+      data?.details && typeof data.details === "object"
+        ? (data.details as Record<string, unknown>)
+        : null;
+
+    const withDetails = applyResultDetails(test, details);
+    if (typeof data?.actual_action === "string") {
+      withDetails.recommendedActionType = data.actual_action as ActionType;
+    }
+    return withDetails;
   }
 
   async getTestById(testId: string): Promise<ResilienceTest | null> {
     const { data, error } = await this.client
       .from("resilience_tests")
       .select("*")
-      .eq("test_id", testId)
+      .eq("id", testId)
       .maybeSingle();
 
     if (error) throwStorageError(`loading resilience test ${testId}`, error);
-    return data ? fromRow(data as TestRow) : null;
+    if (!data) return null;
+    return this.attachResultDetails(fromRow(data as TestRow));
   }
 
   async listTests(limit?: number): Promise<ResilienceTest[]> {
@@ -241,19 +352,21 @@ export class SupabaseResilienceTestRepository
 
     const { data, error } = await request;
     if (error) throwStorageError("listing resilience tests", error);
-    return (data as TestRow[] | null)?.map(fromRow) ?? [];
+    const rows = (data as TestRow[] | null) ?? [];
+    return Promise.all(rows.map((row) => this.attachResultDetails(fromRow(row))));
   }
 
   async findRunningTest(): Promise<ResilienceTest | null> {
     const { data, error } = await this.client
       .from("resilience_tests")
       .select("*")
-      .eq("overall_status", "running")
+      .eq("status", "running")
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (error) throwStorageError("finding running resilience test", error);
-    return data ? fromRow(data as TestRow) : null;
+    if (!data) return null;
+    return this.attachResultDetails(fromRow(data as TestRow));
   }
 }

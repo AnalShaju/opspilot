@@ -11,12 +11,21 @@ const GLOBAL_KEY = "__opspilot_supabase_admin__";
 
 export type OpsPilotSupabase = SupabaseClient;
 
+/**
+ * Accepts either the project URL or a URL that accidentally includes /rest/v1.
+ * createClient always appends /rest/v1 itself.
+ */
+export function normalizeSupabaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  return trimmed.replace(/\/rest\/v1$/i, "");
+}
+
 function readUrl(): string | undefined {
-  return (
+  const raw =
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
     process.env.SUPABASE_URL?.trim() ||
-    undefined
-  );
+    undefined;
+  return raw ? normalizeSupabaseUrl(raw) : undefined;
 }
 
 function readServiceRoleKey(): string | undefined {

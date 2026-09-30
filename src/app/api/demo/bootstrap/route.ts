@@ -2,7 +2,7 @@ import { ensureDemoIncident } from "@/lib/incidents/incidentService";
 import { handleRouteError, jsonOk } from "@/lib/api/http";
 
 /**
- * Ensures a Payment Service demo incident exists for the hackathon flow.
+ * Ensures the default demo incident exists for the hackathon overview flow.
  */
 export async function POST() {
   try {

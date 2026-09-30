@@ -1,7 +1,6 @@
 /**
  * Backend incident types.
- * Kept separate from frontend mock types in src/data/types.ts
- * so the UI can stay stable while the API evolves.
+ * UI display helpers still import shared badge types from src/data/types.ts.
  */
 
 import type { InvestigationStep } from "@/lib/types/agent";

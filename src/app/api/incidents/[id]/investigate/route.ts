@@ -2,7 +2,8 @@ import { investigateIncidentWithAi } from "@/lib/incidents/incidentService";
 import { handleRouteError, jsonOk } from "@/lib/api/http";
 
 /**
- * Runs the DeepSeek incident agent with controlled tools.
+ * Runs the DeepSeek incident agent once: evidence is collected first,
+ * then a single JSON diagnosis call returns root cause + recommended action.
  */
 export async function POST(
   _request: Request,

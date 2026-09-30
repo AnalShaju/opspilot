@@ -57,3 +57,14 @@ export function isAlreadyRolledBackError(details: unknown): boolean {
   const message = simulatorDetailMessage(details)?.toLowerCase() ?? "";
   return message.includes("already rolled back");
 }
+
+/** Simulator 409 when Redis/DB remediation is a no-op because already healthy. */
+export function isAlreadyHealthyRemediationError(details: unknown): boolean {
+  const message = simulatorDetailMessage(details)?.toLowerCase() ?? "";
+  return (
+    message.includes("already healthy") ||
+    message.includes("nothing to restart") ||
+    message.includes("nothing to recover") ||
+    message.includes("already recovered")
+  );
+}

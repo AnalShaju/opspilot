@@ -1,6 +1,10 @@
 /**
- * Supabase implementation of IncidentHistoryRepository.
- * Resolved and failed attempts share incident_history, distinguished by outcome.
+ * Supabase incident_history — matches the LIVE table:
+ * id uuid, incident_id, incident_type, service, root_cause, confidence,
+ * evidence_summary text, action_*, verification_result,
+ * recovery_duration_seconds, resolved_at, created_at
+ *
+ * Only verified recoveries are stored (no outcome column for failures).
  */
 
 import {
@@ -9,11 +13,15 @@ import {
   type IncidentHistoryRepository,
 } from "@/lib/repositories/incident-history.repository";
 import { requireRow, throwStorageError } from "@/lib/supabase/errors";
-import { nextPrefixedId } from "@/lib/supabase/helpers";
+import {
+  msToSeconds,
+  secondsToMs,
+  summaryFromText,
+  summaryToText,
+} from "@/lib/supabase/status-map";
 import { getSupabaseAdmin, type OpsPilotSupabase } from "@/lib/supabase/server";
 import type {
   HistoryListQuery,
-  HistoryOutcome,
   IncidentHistoryRecord,
   NewIncidentHistoryRecord,
   RelevantIncidentQuery,
@@ -22,69 +30,63 @@ import type { ActionType, IncidentType } from "@/lib/types/incident";
 
 type HistoryRow = {
   id: string;
-  incident_id: string;
+  incident_id: string | null;
   incident_type: string;
   service: string;
   root_cause: string;
-  confidence: number;
-  evidence_summary: string[] | null;
-  recommended_action: string;
-  action_type: string;
-  action_target: string;
-  action_result: string;
-  verification_result: string;
-  outcome: string;
+  confidence: number | null;
+  evidence_summary: string | null;
+  action_type: string | null;
+  action_target: string | null;
+  action_result: string | null;
+  verification_result: string | null;
+  recovery_duration_seconds: number | null;
   resolved_at: string;
-  recovery_duration_ms: number | null;
   created_at: string;
 };
-
-function toRow(
-  input: NewIncidentHistoryRecord,
-  id: string,
-  createdAt: string,
-): HistoryRow {
-  return {
-    id,
-    incident_id: input.incidentId,
-    incident_type: input.incidentType,
-    service: input.service,
-    root_cause: input.rootCause,
-    confidence: input.confidence,
-    evidence_summary: [...input.evidenceSummary],
-    recommended_action: input.recommendedAction,
-    action_type: input.actionType,
-    action_target: input.actionTarget,
-    action_result: input.actionResult,
-    verification_result: input.verificationResult,
-    outcome: input.outcome,
-    resolved_at: input.resolvedAt,
-    recovery_duration_ms: input.recoveryDurationMs,
-    created_at: createdAt,
-  };
-}
 
 function fromRow(row: HistoryRow): IncidentHistoryRecord {
   return {
     id: row.id,
-    incidentId: row.incident_id,
+    incidentId: row.incident_id ?? "",
     incidentType: row.incident_type as IncidentType,
     service: row.service,
     rootCause: row.root_cause,
-    confidence: row.confidence,
-    evidenceSummary: Array.isArray(row.evidence_summary)
-      ? row.evidence_summary.map(String)
-      : [],
-    recommendedAction: row.recommended_action,
-    actionType: row.action_type as ActionType,
-    actionTarget: row.action_target,
-    actionResult: row.action_result,
-    verificationResult: row.verification_result,
-    outcome: row.outcome as HistoryOutcome,
+    confidence: row.confidence ?? 0,
+    evidenceSummary: summaryFromText(row.evidence_summary),
+    recommendedAction: `${row.action_type ?? ""} ${row.action_target ?? ""}`.trim(),
+    actionType: (row.action_type as ActionType) ?? "rollback",
+    actionTarget: row.action_target ?? "",
+    actionResult: row.action_result ?? "",
+    verificationResult: row.verification_result ?? "",
+    outcome: "resolved",
     resolvedAt: row.resolved_at,
-    recoveryDurationMs: row.recovery_duration_ms,
+    recoveryDurationMs: secondsToMs(row.recovery_duration_seconds),
     createdAt: row.created_at,
   };
+}
+
+function toInsert(input: NewIncidentHistoryRecord) {
+  return {
+    incident_id: input.incidentId || null,
+    incident_type: input.incidentType,
+    service: input.service,
+    root_cause: input.rootCause,
+    confidence: input.confidence,
+    evidence_summary: summaryToText(input.evidenceSummary),
+    action_type: input.actionType,
+    action_target: input.actionTarget,
+    action_result: input.actionResult,
+    verification_result: input.verificationResult,
+    recovery_duration_seconds: msToSeconds(input.recoveryDurationMs),
+    resolved_at: input.resolvedAt,
+  };
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 export class SupabaseIncidentHistoryRepository
@@ -96,14 +98,12 @@ export class SupabaseIncidentHistoryRepository
     this.client = client;
   }
 
-  private async insert(
+  async saveResolvedIncident(
     input: NewIncidentHistoryRecord,
   ): Promise<IncidentHistoryRecord> {
-    const id = await nextPrefixedId(this.client, "incident_history", "id", "HIST");
-    const createdAt = new Date().toISOString();
     const { data, error } = await this.client
       .from("incident_history")
-      .insert(toRow(input, id, createdAt))
+      .insert(toInsert({ ...input, outcome: "resolved" }))
       .select("*")
       .single();
 
@@ -112,12 +112,20 @@ export class SupabaseIncidentHistoryRepository
     );
   }
 
-  saveResolvedIncident(input: NewIncidentHistoryRecord) {
-    return this.insert({ ...input, outcome: "resolved" });
-  }
-
-  saveFailedAttempt(input: NewIncidentHistoryRecord) {
-    return this.insert({ ...input, outcome: "failed" });
+  /**
+   * The live schema has no outcome column for failures. Failed attempts are
+   * not stored as historical knowledge (matches the product rule).
+   */
+  async saveFailedAttempt(
+    input: NewIncidentHistoryRecord,
+  ): Promise<IncidentHistoryRecord> {
+    return {
+      ...input,
+      outcome: "failed",
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      evidenceSummary: [...input.evidenceSummary],
+    };
   }
 
   async getResolvedIncidents(
@@ -126,7 +134,6 @@ export class SupabaseIncidentHistoryRepository
     let request = this.client
       .from("incident_history")
       .select("*")
-      .eq("outcome", "resolved")
       .order("resolved_at", { ascending: false });
 
     if (query.service) request = request.ilike("service", query.service);
@@ -142,29 +149,17 @@ export class SupabaseIncidentHistoryRepository
   }
 
   async getFailedAttempts(limit?: number): Promise<IncidentHistoryRecord[]> {
-    let request = this.client
-      .from("incident_history")
-      .select("*")
-      .eq("outcome", "failed")
-      .order("resolved_at", { ascending: false });
-
-    if (typeof limit === "number") request = request.limit(limit);
-
-    const { data, error } = await request;
-    if (error) throwStorageError("listing failed history attempts", error);
-    return (data as HistoryRow[] | null)?.map(fromRow) ?? [];
+    void limit;
+    return [];
   }
 
   async getRelevantPreviousIncidents(
     query: RelevantIncidentQuery,
   ): Promise<IncidentHistoryRecord[]> {
     const limit = clampRelevantLimit(query.limit);
-
-    // Pull a modest recent window, then score in-process (deterministic, no vectors).
     const { data, error } = await this.client
       .from("incident_history")
       .select("*")
-      .eq("outcome", "resolved")
       .order("resolved_at", { ascending: false })
       .limit(50);
 
@@ -193,6 +188,9 @@ export class SupabaseIncidentHistoryRepository
   }
 
   async getIncidentById(id: string): Promise<IncidentHistoryRecord | null> {
+    // Non-UUID ids cannot exist in this schema — treat as missing.
+    if (!isUuid(id)) return null;
+
     const byId = await this.client
       .from("incident_history")
       .select("*")

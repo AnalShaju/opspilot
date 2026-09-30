@@ -11,14 +11,14 @@ export default function DeploymentsPage() {
         </h2>
         <p className="mt-3 text-[15px] leading-relaxed text-muted">
           OpsPilot surfaces deployments when they matter — as evidence during
-          an incident. Start from the active Payment Service failure.
+          an incident investigation.
         </p>
       </header>
       <Link
-        href="/incidents/1"
+        href="/incidents"
         className="inline-flex items-center gap-2 bg-accent px-4 py-2.5 text-[14px] font-medium text-white transition-colors duration-150 hover:bg-[#ea580c]"
       >
-        Open investigation
+        Open incidents
         <ArrowRight className="h-4 w-4" />
       </Link>
     </div>

@@ -29,18 +29,17 @@ export const services: Service[] = [
     errorRate: 0.1,
     latencyMs: 95,
     owner: "commerce",
-    version: "v1.8.3",
+    version: "v3.0.1",
   },
   {
     id: "payment",
     name: "Payment Service",
-    status: "critical",
-    uptime: "97.10%",
-    errorRate: 82,
-    latencyMs: 4200,
+    status: "healthy",
+    uptime: "99.97%",
+    errorRate: 0.08,
+    latencyMs: 180,
     owner: "payments",
     version: "v1.8.4",
-    incidentId: "1",
   },
   {
     id: "database",
@@ -53,12 +52,3 @@ export const services: Service[] = [
     version: "pg-15.4",
   },
 ];
-
-export function getServiceById(id: string): Service | undefined {
-  return services.find((service) => service.id === id);
-}
-
-export function getHealthyCount(): { healthy: number; total: number } {
-  const healthy = services.filter((s) => s.status === "healthy").length;
-  return { healthy, total: services.length };
-}
