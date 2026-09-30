@@ -1,6 +1,9 @@
 import { approveAndRemediate } from "@/lib/incidents/incidentService";
 import { handleRouteError, jsonError, jsonOk } from "@/lib/api/http";
 
+/** Remediation + verify against the live simulator. */
+export const maxDuration = 60;
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },

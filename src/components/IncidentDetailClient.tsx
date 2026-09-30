@@ -27,6 +27,7 @@ const TOOL_LABELS: Record<string, string> = {
   getMetrics: "Metrics checked",
   getPreviousIncidents: "Previous incidents checked",
   getIncidentHistory: "Past resolved incidents reviewed",
+  deepseek: "DeepSeek analyzing evidence",
 };
 
 const RECOVERY_STEP_COUNT = 3;
@@ -256,6 +257,20 @@ export function IncidentDetailClient({
         running: steps.some((s) => s.tool === tool && s.status === "running"),
       }),
     );
+
+    const evidenceDone =
+      list.length > 0 &&
+      list.every((item) => item.done) &&
+      !list.some((item) => item.running);
+
+    if (phase === "investigating" && evidenceDone) {
+      list.push({
+        key: "deepseek",
+        label: TOOL_LABELS.deepseek,
+        done: false,
+        running: true,
+      });
+    }
 
     if (
       phase === "awaiting_approval" ||

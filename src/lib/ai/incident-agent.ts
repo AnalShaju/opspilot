@@ -59,7 +59,7 @@ const defaultDependencies = (incident: Incident): AgentDependencies => ({
   callModel: async (messages) =>
     (await callDeepSeek({ messages, jsonMode: true })).content,
   onProgress: (steps) => {
-    void writeSteps(incident.id, steps);
+    enqueueProgress(incident.id, steps);
   },
 });
 
@@ -239,6 +239,14 @@ export function validateAgentDiagnosis(
 async function writeSteps(incidentId: string, steps: InvestigationStep[]) {
   const existing = await getIncident(incidentId);
   if (!existing) return;
+  // Skip if a newer investigation already finished (avoid clobbering).
+  if (
+    existing.status === "awaiting_approval" ||
+    existing.status === "resolved" ||
+    existing.status === "investigation_failed"
+  ) {
+    return;
+  }
   await updateIncident(incidentId, {
     status: "investigating",
     investigation: {
@@ -248,6 +256,27 @@ async function writeSteps(incidentId: string, steps: InvestigationStep[]) {
       steps: [...steps],
     },
   });
+}
+
+/** Serialize progress writes so a slow "running" update cannot overwrite "completed". */
+const progressQueues = new Map<string, Promise<void>>();
+
+function enqueueProgress(
+  incidentId: string,
+  steps: InvestigationStep[],
+): void {
+  const previous = progressQueues.get(incidentId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => writeSteps(incidentId, steps));
+  progressQueues.set(
+    incidentId,
+    next.finally(() => {
+      if (progressQueues.get(incidentId) === next) {
+        progressQueues.delete(incidentId);
+      }
+    }),
+  );
 }
 
 export async function runIncidentAgent(

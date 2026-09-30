@@ -71,10 +71,8 @@ function summarize(tool: InvestigationToolName, result: unknown): string {
 }
 
 /**
- * Collect all evidence sequentially (fixed order, readable progress).
- * - Core sources (services/logs/metrics/deployments) must succeed, otherwise
- *   the investigation fails with a clear simulator error.
- * - Health and the simulator incident log degrade gracefully.
+ * Collect all evidence. Critical simulator reads run in parallel for speed
+ * (important on Vercel time limits); progress still updates per source.
  */
 export async function collectEvidence(options?: {
   sources?: Partial<EvidenceSources>;
@@ -84,11 +82,7 @@ export async function collectEvidence(options?: {
   const steps: InvestigationStep[] = [];
   const report = () => options?.onProgress?.(steps.map((s) => ({ ...s })));
 
-  async function run<T>(
-    tool: InvestigationToolName,
-    fn: () => Promise<T>,
-    critical: boolean,
-  ): Promise<T | null> {
+  function start(tool: InvestigationToolName): InvestigationStep {
     const step: InvestigationStep = {
       tool,
       status: "running",
@@ -96,36 +90,90 @@ export async function collectEvidence(options?: {
     };
     steps.push(step);
     report();
-
-    try {
-      const result = await fn();
-      step.status = "completed";
-      step.completedAt = new Date().toISOString();
-      step.summary = summarize(tool, result);
-      report();
-      return result;
-    } catch (error) {
-      step.status = "failed";
-      step.completedAt = new Date().toISOString();
-      step.error = error instanceof Error ? error.message : "Tool call failed";
-      report();
-      if (critical) throw error;
-      return null;
-    }
+    return step;
   }
 
-  const logs = (await run("getLogs", sources.getLogs, true)) ?? [];
-  const services = (await run("getServices", sources.getServices, true)) ?? [];
-  const deployments =
-    (await run("getDeployments", sources.getDeployments, true)) ?? [];
-  const metrics = (await run("getMetrics", sources.getMetrics, true)) ?? {};
-  const health = await run("getHealth", sources.getHealth, false);
-  const simulatorIncidents =
-    (await run("getPreviousIncidents", sources.getPreviousIncidents, false)) ??
-    [];
+  function succeed(step: InvestigationStep, result: unknown) {
+    step.status = "completed";
+    step.completedAt = new Date().toISOString();
+    step.summary = summarize(step.tool, result);
+    report();
+  }
+
+  function fail(step: InvestigationStep, error: unknown) {
+    step.status = "failed";
+    step.completedAt = new Date().toISOString();
+    step.error = error instanceof Error ? error.message : "Tool call failed";
+    report();
+  }
+
+  const logStep = start("getLogs");
+  const serviceStep = start("getServices");
+  const deploymentStep = start("getDeployments");
+  const metricsStep = start("getMetrics");
+
+  const [logsResult, servicesResult, deploymentsResult, metricsResult] =
+    await Promise.allSettled([
+      sources.getLogs(),
+      sources.getServices(),
+      sources.getDeployments(),
+      sources.getMetrics(),
+    ]);
+
+  if (logsResult.status === "fulfilled") succeed(logStep, logsResult.value);
+  else {
+    fail(logStep, logsResult.reason);
+    throw logsResult.reason;
+  }
+
+  if (servicesResult.status === "fulfilled") {
+    succeed(serviceStep, servicesResult.value);
+  } else {
+    fail(serviceStep, servicesResult.reason);
+    throw servicesResult.reason;
+  }
+
+  if (deploymentsResult.status === "fulfilled") {
+    succeed(deploymentStep, deploymentsResult.value);
+  } else {
+    fail(deploymentStep, deploymentsResult.reason);
+    throw deploymentsResult.reason;
+  }
+
+  if (metricsResult.status === "fulfilled") {
+    succeed(metricsStep, metricsResult.value);
+  } else {
+    fail(metricsStep, metricsResult.reason);
+    throw metricsResult.reason;
+  }
+
+  const healthStep = start("getHealth");
+  let health: SimulatorHealth | null = null;
+  try {
+    health = await sources.getHealth();
+    succeed(healthStep, health);
+  } catch (error) {
+    fail(healthStep, error);
+  }
+
+  const previousStep = start("getPreviousIncidents");
+  let simulatorIncidents: SimulatorPreviousIncident[] = [];
+  try {
+    simulatorIncidents = await sources.getPreviousIncidents();
+    succeed(previousStep, simulatorIncidents);
+  } catch (error) {
+    fail(previousStep, error);
+  }
 
   return {
-    evidence: { services, logs, metrics, deployments, health, simulatorIncidents },
+    evidence: {
+      services: servicesResult.value,
+      logs: logsResult.value,
+      metrics: metricsResult.value,
+      deployments: deploymentsResult.value,
+      health,
+      simulatorIncidents,
+    },
     steps,
   };
 }
