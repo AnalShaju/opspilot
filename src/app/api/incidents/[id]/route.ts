@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
-    const incident = getIncidentById(id);
+    const incident = await getIncidentById(id);
 
     if (!incident) {
       return jsonError(`Incident not found: ${id}`, 404);

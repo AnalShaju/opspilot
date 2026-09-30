@@ -58,10 +58,39 @@ const defaultDependencies = (incident: Incident): AgentDependencies => ({
     }),
   callModel: async (messages) =>
     (await callDeepSeek({ messages, jsonMode: true })).content,
-  onProgress: (steps) => writeSteps(incident.id, steps),
+  onProgress: (steps) => {
+    void writeSteps(incident.id, steps);
+  },
 });
 
-function extractJsonObject(content: string): unknown {
+/**
+ * Appends missing closing braces/brackets (at most 2) when the text is
+ * otherwise well-formed, e.g. the model forgot the last "}". Returns null when
+ * the text is unbalanced in any other way (open string, mismatched closer, ...).
+ */
+function closeTrailingBrackets(text: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") stack.push("}");
+    else if (char === "[") stack.push("]");
+    else if (char === "}" || char === "]") {
+      if (stack.pop() !== char) return null;
+    }
+  }
+  if (inString || stack.length === 0 || stack.length > 2) return null;
+  return text + stack.reverse().join("");
+}
+
+export function extractJsonObject(content: string): unknown {
   const trimmed = content.trim();
   try {
     return JSON.parse(trimmed);
@@ -69,14 +98,46 @@ function extractJsonObject(content: string): unknown {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
     if (start >= 0 && end > start) {
+      const candidate = trimmed.slice(start, end + 1);
       try {
-        return JSON.parse(trimmed.slice(start, end + 1));
+        return JSON.parse(candidate);
       } catch {
-        // fall through
+        const repaired = closeTrailingBrackets(candidate);
+        if (repaired) {
+          try {
+            return JSON.parse(repaired);
+          } catch {
+            // fall through
+          }
+        }
       }
     }
     throw new AgentError("AI returned non-JSON final response", "INVALID_JSON");
   }
+}
+
+/**
+ * Models occasionally close a brace too late and nest `recommendedAction`
+ * inside `rootCause`. That single, unambiguous slip is repaired; anything else
+ * is still rejected, and the lifted action goes through full validation.
+ */
+function liftMisplacedAction(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  if (data.recommendedAction) return data;
+  const rootCause = data.rootCause;
+  if (
+    rootCause &&
+    typeof rootCause === "object" &&
+    "recommendedAction" in rootCause
+  ) {
+    const { recommendedAction, ...cleanRootCause } = rootCause as Record<
+      string,
+      unknown
+    >;
+    return { ...data, rootCause: cleanRootCause, recommendedAction };
+  }
+  return data;
 }
 
 export function validateAgentDiagnosis(
@@ -91,7 +152,7 @@ export function validateAgentDiagnosis(
     throw new AgentError("AI diagnosis is not an object", "INVALID_DIAGNOSIS");
   }
 
-  const data = raw as Record<string, unknown>;
+  const data = liftMisplacedAction(raw as Record<string, unknown>);
   const rootCause = data.rootCause as Record<string, unknown> | undefined;
   const recommendedAction = data.recommendedAction as
     | Record<string, unknown>
@@ -175,10 +236,10 @@ export function validateAgentDiagnosis(
   };
 }
 
-function writeSteps(incidentId: string, steps: InvestigationStep[]) {
-  const existing = getIncident(incidentId);
+async function writeSteps(incidentId: string, steps: InvestigationStep[]) {
+  const existing = await getIncident(incidentId);
   if (!existing) return;
-  updateIncident(incidentId, {
+  await updateIncident(incidentId, {
     status: "investigating",
     investigation: {
       ...(existing.investigation ?? {
@@ -245,11 +306,23 @@ export async function runIncidentAgent(
   }
 
   // 4. Validate before anything can act on it.
-  const diagnosis = validateAgentDiagnosis(extractJsonObject(content), {
-    evidence,
-    incidentService: incident.service,
-    detectedIncidentType,
-  });
+  let diagnosis: AgentDiagnosis;
+  try {
+    diagnosis = validateAgentDiagnosis(extractJsonObject(content), {
+      evidence,
+      incidentService: incident.service,
+      detectedIncidentType,
+    });
+  } catch (error) {
+    // Diagnostic only: the response is truncated and contains no secrets.
+    logEvent("AI_INVALID_RESPONSE", {
+      incidentId: incident.id,
+      reason: error instanceof Error ? error.message : "unknown",
+      length: content.length,
+      snippet: content.slice(0, 1600),
+    });
+    throw error;
+  }
 
   logEvent("AI_ANALYSIS_COMPLETED", {
     incidentId: incident.id,

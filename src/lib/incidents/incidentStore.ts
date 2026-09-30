@@ -1,59 +1,34 @@
 /**
- * In-memory incident store (hackathon MVP).
- * Uses globalThis so Next.js hot reload does not wipe incidents in dev.
+ * Incident store facade over the configured IncidentRepository.
+ * Callers should prefer incidentService; this keeps a thin async API for
+ * progress updates and tests.
  */
 
+import { getIncidentRepository } from "@/lib/repositories";
 import type { Incident } from "@/lib/types/incident";
 
-type StoreShape = {
-  incidents: Map<string, Incident>;
-  seq: number;
-};
-
-const GLOBAL_KEY = "__opspilot_incident_store__";
-
-function getStore(): StoreShape {
-  const globalRef = globalThis as typeof globalThis & {
-    [GLOBAL_KEY]?: StoreShape;
-  };
-
-  if (!globalRef[GLOBAL_KEY]) {
-    globalRef[GLOBAL_KEY] = {
-      incidents: new Map(),
-      seq: 1,
-    };
-  }
-
-  return globalRef[GLOBAL_KEY];
+export async function createIncidentId(): Promise<string> {
+  return getIncidentRepository().nextId();
 }
 
-export function createIncidentId(): string {
-  const store = getStore();
-  const id = `INC-${String(store.seq).padStart(3, "0")}`;
-  store.seq += 1;
-  return id;
+export async function listIncidents(): Promise<Incident[]> {
+  return getIncidentRepository().list();
 }
 
-export function listIncidents(): Incident[] {
-  return Array.from(getStore().incidents.values()).sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt),
-  );
+export async function getIncident(id: string): Promise<Incident | undefined> {
+  const found = await getIncidentRepository().getById(id);
+  return found ?? undefined;
 }
 
-export function getIncident(id: string): Incident | undefined {
-  return getStore().incidents.get(id);
+export async function saveIncident(incident: Incident): Promise<Incident> {
+  return getIncidentRepository().save(incident);
 }
 
-export function saveIncident(incident: Incident): Incident {
-  getStore().incidents.set(incident.id, incident);
-  return incident;
-}
-
-export function updateIncident(
+export async function updateIncident(
   id: string,
   patch: Partial<Incident>,
-): Incident | undefined {
-  const existing = getIncident(id);
+): Promise<Incident | undefined> {
+  const existing = await getIncident(id);
   if (!existing) return undefined;
 
   const updated: Incident = {
@@ -67,9 +42,10 @@ export function updateIncident(
   return saveIncident(updated);
 }
 
-/** Test helper — clears all incidents. */
-export function clearIncidents(): void {
-  const store = getStore();
-  store.incidents.clear();
-  store.seq = 1;
+/** Test helper — clears in-memory incidents only. */
+export async function clearIncidents(): Promise<void> {
+  const repo = getIncidentRepository();
+  if ("clear" in repo && typeof repo.clear === "function") {
+    repo.clear();
+  }
 }

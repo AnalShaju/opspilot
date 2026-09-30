@@ -6,6 +6,8 @@
  *            -> awaiting_approval -> human approves
  *            -> deterministic remediation -> health verification
  *            -> resolved (saved to incident history) | failed
+ *
+ * Persistence is behind IncidentRepository (in-memory or Supabase).
  */
 
 import {
@@ -41,9 +43,11 @@ import type {
 } from "@/lib/types/incident";
 import type { SimulatorHealth } from "@/lib/types/simulator";
 
-export function createIncident(input: CreateIncidentInput): Incident {
+export async function createIncident(
+  input: CreateIncidentInput,
+): Promise<Incident> {
   const now = new Date().toISOString();
-  const id = createIncidentId();
+  const id = await createIncidentId();
 
   const incident: Incident = {
     id,
@@ -66,9 +70,9 @@ export function createIncident(input: CreateIncidentInput): Incident {
   return saveIncident(incident);
 }
 
-export function ensureDemoIncident(): Incident {
+export async function ensureDemoIncident(): Promise<Incident> {
   // Resilience-test incidents are never reused as the demo incident.
-  const existing = listIncidents().find((item) => item.source === "demo");
+  const existing = (await listIncidents()).find((item) => item.source === "demo");
 
   if (existing) {
     // Re-arm terminal demo states so homepage → investigate works repeatedly.
@@ -77,7 +81,7 @@ export function ensureDemoIncident(): Incident {
       existing.status === "failed" ||
       existing.status === "investigation_failed"
     ) {
-      const reset = updateIncident(existing.id, {
+      const reset = await updateIncident(existing.id, {
         status: "detected",
         incidentType: undefined,
         rootCause: undefined,
@@ -105,11 +109,13 @@ export function ensureDemoIncident(): Incident {
   });
 }
 
-export function getAllIncidents(): Incident[] {
+export async function getAllIncidents(): Promise<Incident[]> {
   return listIncidents();
 }
 
-export function getIncidentById(id: string): Incident | undefined {
+export async function getIncidentById(
+  id: string,
+): Promise<Incident | undefined> {
   return getIncident(id);
 }
 
@@ -136,7 +142,7 @@ function inflightInvestigations(): Map<string, Promise<InvestigationOutcome>> {
 export async function investigateIncidentWithAi(
   incidentId: string,
 ): Promise<InvestigationOutcome> {
-  const existing = getIncident(incidentId);
+  const existing = await getIncident(incidentId);
   if (!existing) {
     throw new Error(`Incident not found: ${incidentId}`);
   }
@@ -165,7 +171,7 @@ export async function investigateIncidentWithAi(
 async function runInvestigation(
   incidentId: string,
 ): Promise<InvestigationOutcome> {
-  const existing = getIncident(incidentId);
+  const existing = await getIncident(incidentId);
   if (!existing) throw new Error(`Incident not found: ${incidentId}`);
 
   // Retrying after a failure starts from a clean slate.
@@ -173,7 +179,7 @@ async function runInvestigation(
     existing.status === "failed" ||
     existing.status === "investigation_failed"
   ) {
-    updateIncident(incidentId, {
+    await updateIncident(incidentId, {
       status: "investigating",
       recovery: undefined,
       approval: undefined,
@@ -182,13 +188,13 @@ async function runInvestigation(
       investigation: undefined,
     });
   } else {
-    updateIncident(incidentId, { status: "investigating" });
+    await updateIncident(incidentId, { status: "investigating" });
   }
 
   const startedAt =
-    getIncident(incidentId)?.investigation?.startedAt ??
+    (await getIncident(incidentId))?.investigation?.startedAt ??
     new Date().toISOString();
-  updateIncident(incidentId, {
+  await updateIncident(incidentId, {
     investigation: { startedAt, steps: [] },
   });
 
@@ -201,10 +207,12 @@ async function runInvestigation(
       await prepareDemoScenario({ preserveActive: resilienceRunning });
     }
 
-    const result = await runIncidentAgent(getIncident(incidentId) ?? existing);
+    const result = await runIncidentAgent(
+      (await getIncident(incidentId)) ?? existing,
+    );
     const { diagnosis } = result;
 
-    const incident = updateIncident(incidentId, {
+    const incident = await updateIncident(incidentId, {
       status: "awaiting_approval",
       incidentType: diagnosis.incidentType,
       rootCause: {
@@ -250,9 +258,9 @@ async function runInvestigation(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Investigation failed";
-    const current = getIncident(incidentId);
+    const current = await getIncident(incidentId);
 
-    updateIncident(incidentId, {
+    await updateIncident(incidentId, {
       status: "investigation_failed",
       investigation: {
         startedAt,
@@ -266,12 +274,12 @@ async function runInvestigation(
   }
 }
 
-function verificationFailed(
+async function verificationFailed(
   incidentId: string,
   recovery: Recovery,
   reason: string,
   raw?: unknown,
-): Incident | undefined {
+): Promise<Incident | undefined> {
   return updateIncident(incidentId, {
     status: "failed",
     recovery: {
@@ -288,7 +296,7 @@ export async function approveAndRemediate(
   incidentId: string,
   approved: boolean,
 ): Promise<Incident> {
-  const existing = getIncident(incidentId);
+  const existing = await getIncident(incidentId);
   if (!existing) {
     throw new Error(`Incident not found: ${incidentId}`);
   }
@@ -305,7 +313,7 @@ export async function approveAndRemediate(
   logEvent("APPROVAL_RECEIVED", { incidentId, approved });
 
   if (!approved) {
-    const declined = updateIncident(incidentId, {
+    const declined = await updateIncident(incidentId, {
       approval: {
         approved: false,
         approvedAt: new Date().toISOString(),
@@ -348,12 +356,12 @@ export async function approveAndRemediate(
     action.target !== recommended.target ||
     action.service !== recommended.service
   ) {
-    updateIncident(incidentId, {
+    await updateIncident(incidentId, {
       recommendedAction: { ...recommended, ...action },
     });
   }
 
-  updateIncident(incidentId, {
+  await updateIncident(incidentId, {
     approval: {
       approved: true,
       approvedAt: new Date().toISOString(),
@@ -371,7 +379,7 @@ export async function approveAndRemediate(
   try {
     actionResult = await executeRemediation(action);
   } catch (error) {
-    const failed = updateIncident(incidentId, {
+    const failed = await updateIncident(incidentId, {
       status: "failed",
       recovery: {
         action: action.type,
@@ -402,7 +410,7 @@ export async function approveAndRemediate(
       `${action.type} ${action.target} executed successfully`,
   };
 
-  updateIncident(incidentId, {
+  await updateIncident(incidentId, {
     status: "verifying",
     recovery: executedRecovery,
   });
@@ -411,7 +419,7 @@ export async function approveAndRemediate(
   try {
     health = await verifyHealth();
   } catch (error) {
-    const failed = verificationFailed(
+    const failed = await verificationFailed(
       incidentId,
       executedRecovery,
       "Health verification could not be completed.",
@@ -429,7 +437,7 @@ export async function approveAndRemediate(
     errorRate: health.errorRate,
   });
 
-  const resolved = updateIncident(incidentId, {
+  const resolved = await updateIncident(incidentId, {
     status: recovered ? "resolved" : "failed",
     recovery: {
       ...executedRecovery,
@@ -456,7 +464,7 @@ export async function approveAndRemediate(
   if (recovered) {
     logEvent("INCIDENT_RESOLVED", { incidentId });
     const report = generateIncidentReport(resolved);
-    const final = updateIncident(incidentId, { report }) ?? resolved;
+    const final = (await updateIncident(incidentId, { report })) ?? resolved;
     // Learn from it: only verified recoveries are stored as resolved.
     await incidentHistoryService.recordOutcome(final);
     return final;
@@ -467,8 +475,8 @@ export async function approveAndRemediate(
   return resolved;
 }
 
-export function getIncidentReport(incidentId: string) {
-  const incident = getIncident(incidentId);
+export async function getIncidentReport(incidentId: string) {
+  const incident = await getIncident(incidentId);
   if (!incident) {
     throw new Error(`Incident not found: ${incidentId}`);
   }

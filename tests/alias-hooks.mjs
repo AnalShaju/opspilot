@@ -2,11 +2,16 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const SRC = path.resolve(process.cwd(), "src");
+const ROOT = process.cwd();
+const ALIASES = [
+  ["@/", path.resolve(ROOT, "src")],
+  ["@tests/", path.resolve(ROOT, "tests")],
+];
 
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier.startsWith("@/")) {
-    const base = path.join(SRC, specifier.slice(2));
+  for (const [prefix, dir] of ALIASES) {
+    if (!specifier.startsWith(prefix)) continue;
+    const base = path.join(dir, specifier.slice(prefix.length));
     const candidates = [
       `${base}.ts`,
       `${base}.tsx`,

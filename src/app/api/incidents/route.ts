@@ -14,7 +14,7 @@ const SEVERITIES: IncidentSeverity[] = [
 
 export async function GET() {
   try {
-    return jsonOk({ incidents: getAllIncidents() });
+    return jsonOk({ incidents: await getAllIncidents() });
   } catch (error) {
     return handleRouteError(error);
   }
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const incident = createIncident({
+    const incident = await createIncident({
       service: body.service,
       title: body.title,
       description: body.description,

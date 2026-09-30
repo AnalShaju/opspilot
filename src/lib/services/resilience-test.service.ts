@@ -244,8 +244,8 @@ export interface ResilienceDependencies {
     getHealth: () => Promise<SimulatorHealth>;
   };
   incidents: {
-    create: (input: CreateIncidentInput) => Incident;
-    get: (id: string) => Incident | undefined;
+    create: (input: CreateIncidentInput) => Promise<Incident>;
+    get: (id: string) => Promise<Incident | undefined>;
     /** Existing investigation pipeline (evidence -> history -> ONE AI call). */
     investigate: (id: string) => Promise<unknown>;
   };
@@ -304,7 +304,7 @@ export function createResilienceTestService(
     if (terminal(test) || !test.incidentId) return test;
     const derived = deriveTestFromIncident(
       test,
-      deps.incidents.get(test.incidentId),
+      await deps.incidents.get(test.incidentId),
       deps.now(),
     );
     if (JSON.stringify(derived) === JSON.stringify(test)) return test;
@@ -472,7 +472,7 @@ export function createResilienceTestService(
         ? (detected.severity as IncidentSeverity)
         : "high";
       const title = detected.title ?? scenario.name;
-      const incident = deps.incidents.create({
+      const incident = await deps.incidents.create({
         service: detected.service ?? "Unknown service",
         title,
         description: describeUnhealthyServices(health) ?? title,

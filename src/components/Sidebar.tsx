@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   FileText,
+  FlaskConical,
+  History,
   LayoutDashboard,
   Menu,
   Server,
@@ -16,6 +18,8 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/incidents", label: "Incidents", icon: AlertTriangle },
+  { href: "/history", label: "History", icon: History },
+  { href: "/resilience", label: "Resilience", icon: FlaskConical },
   { href: "/services", label: "Services", icon: Server },
   { href: "/reports", label: "Reports", icon: FileText },
 ];

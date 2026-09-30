@@ -1,15 +1,16 @@
 /**
- * Repository factory — the ONE place that decides which storage backs the
- * new features.
+ * Repository factory — the ONE place that decides which storage backs OpsPilot.
  *
- * Today: in-memory (cached on globalThis so HMR keeps data in dev).
- * Next:  Supabase. Implement the two interfaces and switch here, e.g.
+ * - Supabase when NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are set
+ * - In-memory otherwise (and always when STORAGE_DRIVER=memory)
  *
- *   if (process.env.STORAGE_DRIVER === "supabase") {
- *     return new SupabaseIncidentHistoryRepository(...);
- *   }
+ * Tests inject in-memory repos via the set* helpers.
  */
 
+import {
+  InMemoryIncidentRepository,
+  type IncidentRepository,
+} from "@/lib/repositories/incident.repository";
 import {
   InMemoryIncidentHistoryRepository,
   type IncidentHistoryRepository,
@@ -18,13 +19,19 @@ import {
   InMemoryResilienceTestRepository,
   type ResilienceTestRepository,
 } from "@/lib/repositories/resilience-test.repository";
+import { SupabaseIncidentRepository } from "@/lib/repositories/supabase-incident.repository";
+import { SupabaseIncidentHistoryRepository } from "@/lib/repositories/supabase-incident-history.repository";
+import { SupabaseResilienceTestRepository } from "@/lib/repositories/supabase-resilience-test.repository";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
 
 export type {
+  IncidentRepository,
   IncidentHistoryRepository,
   ResilienceTestRepository,
 };
 
 type Registry = {
+  incidents?: IncidentRepository;
   history?: IncidentHistoryRepository;
   resilience?: ResilienceTestRepository;
 };
@@ -39,19 +46,49 @@ function registry(): Registry {
   return globalRef[GLOBAL_KEY];
 }
 
+function createIncidentRepository(): IncidentRepository {
+  return isSupabaseConfigured()
+    ? new SupabaseIncidentRepository()
+    : new InMemoryIncidentRepository();
+}
+
+function createHistoryRepository(): IncidentHistoryRepository {
+  return isSupabaseConfigured()
+    ? new SupabaseIncidentHistoryRepository()
+    : new InMemoryIncidentHistoryRepository();
+}
+
+function createResilienceRepository(): ResilienceTestRepository {
+  return isSupabaseConfigured()
+    ? new SupabaseResilienceTestRepository()
+    : new InMemoryResilienceTestRepository();
+}
+
+export function getIncidentRepository(): IncidentRepository {
+  const reg = registry();
+  if (!reg.incidents) reg.incidents = createIncidentRepository();
+  return reg.incidents;
+}
+
 export function getIncidentHistoryRepository(): IncidentHistoryRepository {
   const reg = registry();
-  if (!reg.history) reg.history = new InMemoryIncidentHistoryRepository();
+  if (!reg.history) reg.history = createHistoryRepository();
   return reg.history;
 }
 
 export function getResilienceTestRepository(): ResilienceTestRepository {
   const reg = registry();
-  if (!reg.resilience) reg.resilience = new InMemoryResilienceTestRepository();
+  if (!reg.resilience) reg.resilience = createResilienceRepository();
   return reg.resilience;
 }
 
-/** Swap implementations (tests, or wiring Supabase at startup). */
+/** Swap implementations (tests, or forcing a driver at startup). */
+export function setIncidentRepository(
+  repository: IncidentRepository | null,
+): void {
+  registry().incidents = repository ?? undefined;
+}
+
 export function setIncidentHistoryRepository(
   repository: IncidentHistoryRepository | null,
 ): void {

@@ -30,7 +30,14 @@ Copy `.env.example` → `.env.local`:
 DEEPSEEK_API_KEY=your_key
 SIMULATOR_URL=http://localhost:3001
 USE_MOCK_SIMULATOR=false
+
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 ```
+
+`SUPABASE_SERVICE_ROLE_KEY` is **server-only** — never use a `NEXT_PUBLIC_` prefix for it.
+When both Supabase vars are set, OpsPilot persists to Supabase; otherwise it falls back to in-memory storage.
+If your tables differ from this app's mapping, run `supabase/schema.sql` in the Supabase SQL editor (or align column names to match).
 
 Set `USE_MOCK_SIMULATOR=true` only when the simulator is offline (local fake data).
 

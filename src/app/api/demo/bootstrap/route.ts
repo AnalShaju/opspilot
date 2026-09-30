@@ -6,7 +6,7 @@ import { handleRouteError, jsonOk } from "@/lib/api/http";
  */
 export async function POST() {
   try {
-    const incident = ensureDemoIncident();
+    const incident = await ensureDemoIncident();
     return jsonOk({ incident });
   } catch (error) {
     return handleRouteError(error);

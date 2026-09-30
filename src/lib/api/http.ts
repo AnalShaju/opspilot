@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { AgentError } from "@/lib/types/agent";
 import { DeepSeekError } from "@/lib/ai/deepseek";
+import { ResilienceTestError } from "@/lib/types/resilience";
+import { StorageError } from "@/lib/supabase/errors";
 import { SimulatorError } from "@/lib/types/simulator";
 
 export function jsonOk<T>(data: T, status = 200) {
@@ -29,6 +31,14 @@ export function handleRouteError(error: unknown) {
 
   if (error instanceof DeepSeekError) {
     return jsonError(error.message, error.status);
+  }
+
+  if (error instanceof ResilienceTestError) {
+    return jsonError(error.message, error.status);
+  }
+
+  if (error instanceof StorageError) {
+    return jsonError(error.message, error.status, { code: error.code });
   }
 
   if (error instanceof AgentError) {

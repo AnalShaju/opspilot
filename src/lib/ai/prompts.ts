@@ -1,9 +1,10 @@
 import type { CollectedEvidence } from "@/lib/evidence/collector";
+import { formatDuration } from "@/lib/format";
 import type { IncidentHistoryRecord } from "@/lib/types/history";
 import type { Incident, IncidentType } from "@/lib/types/incident";
 
 export const HISTORY_DISCLAIMER =
-  "Previous incidents are historical context only. Do not assume the current incident has the same root cause. Use current evidence as the primary source of truth.";
+  "Previous incidents are historical context only. Current evidence is the primary source of truth. Do not assume the current incident has the same root cause as a previous incident.";
 
 export const OPSPILOT_SYSTEM_PROMPT = `You are OpsPilot Incident Commander — an AI that investigates production software incidents.
 
@@ -31,22 +32,26 @@ Allowed remediation actions (exactly one of):
 2. "restart_redis" — restart Redis (cache / session store). target: "Redis".
 3. "recover_database" — recover the database connection pool. target: "Database".
 
-Reply with ONLY valid JSON matching this schema:
+Reply with ONLY valid JSON. The object has EXACTLY FOUR top-level keys:
+"investigationSummary", "incidentType", "rootCause", and "recommendedAction".
+"recommendedAction" is a SIBLING of "rootCause", never nested inside it.
+
+Template (replace every <placeholder>; keep this structure exactly):
 
 {
-  "investigationSummary": "2-3 sentence summary of what you checked and concluded",
-  "incidentType": "deployment_regression" | "cache_failure" | "database_failure" | "unknown",
+  "investigationSummary": "<2-3 sentence summary of what you checked and concluded>",
+  "incidentType": "<one of: deployment_regression, cache_failure, database_failure, unknown>",
   "rootCause": {
-    "summary": "string",
-    "confidence": 0.0,
-    "evidence": ["string"]
+    "summary": "<one-sentence root cause>",
+    "confidence": <number from 0 to 1>,
+    "evidence": ["<short factual bullet>", "<short factual bullet>"]
   },
   "recommendedAction": {
-    "type": "rollback" | "restart_redis" | "recover_database",
-    "target": "string",
-    "service": "string (required for rollback)",
-    "risk": "low" | "medium" | "high",
-    "reason": "string"
+    "type": "<one of: rollback, restart_redis, recover_database>",
+    "target": "<version for rollback, otherwise Redis or Database>",
+    "service": "<owning service; required for rollback>",
+    "risk": "<one of: low, medium, high>",
+    "reason": "<why this fix addresses the root cause>"
   }
 }
 
@@ -61,13 +66,6 @@ const MAX_LOG_LINES = 40;
 
 function json(value: unknown): string {
   return JSON.stringify(value);
-}
-
-export function formatDuration(ms: number | null): string {
-  if (ms === null) return "unknown";
-  const seconds = Math.max(1, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 /** Renders previous resolved incidents, clearly separated from current data. */

@@ -1,4 +1,9 @@
+import type { IncidentHistoryRecord } from "@/lib/types/history";
 import type { Incident } from "@/lib/types/incident";
+import type {
+  ResilienceScenarioDefinition,
+  ResilienceTest,
+} from "@/lib/types/resilience";
 
 async function parseJson<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T & { error?: string };
@@ -56,4 +61,46 @@ export async function fetchIncidentReport(id: string) {
     cache: "no-store",
   });
   return parseJson<{ report: Incident["report"] }>(response);
+}
+
+export async function fetchIncidentHistory(): Promise<IncidentHistoryRecord[]> {
+  const response = await fetch("/api/incidents/history", { cache: "no-store" });
+  const data = await parseJson<{ records: IncidentHistoryRecord[] }>(response);
+  return data.records;
+}
+
+export async function fetchResilience(): Promise<{
+  scenarios: ResilienceScenarioDefinition[];
+  tests: ResilienceTest[];
+}> {
+  const response = await fetch("/api/resilience-tests", { cache: "no-store" });
+  return parseJson(response);
+}
+
+export async function fetchResilienceTest(id: string): Promise<ResilienceTest> {
+  const response = await fetch(`/api/resilience-tests/${id}`, {
+    cache: "no-store",
+  });
+  const data = await parseJson<{ test: ResilienceTest }>(response);
+  return data.test;
+}
+
+export async function startResilienceTest(
+  scenarioId: string,
+): Promise<ResilienceTest> {
+  const response = await fetch("/api/resilience-tests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenarioId }),
+  });
+  const data = await parseJson<{ test: ResilienceTest }>(response);
+  return data.test;
+}
+
+export async function cancelResilienceTest(id: string): Promise<ResilienceTest> {
+  const response = await fetch(`/api/resilience-tests/${id}/cancel`, {
+    method: "POST",
+  });
+  const data = await parseJson<{ test: ResilienceTest }>(response);
+  return data.test;
 }

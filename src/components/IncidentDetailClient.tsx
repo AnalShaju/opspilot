@@ -25,13 +25,57 @@ const TOOL_LABELS: Record<string, string> = {
   getDeployments: "Recent deployments checked",
   getMetrics: "Metrics checked",
   getPreviousIncidents: "Previous incidents checked",
+  getIncidentHistory: "Past resolved incidents reviewed",
 };
 
-const recoverySteps = [
-  "Deployment rolled back",
-  "Payment service restarted",
-  "Recovery verified",
-];
+const RECOVERY_STEP_COUNT = 3;
+
+function recoveryStepLabels(incident: Incident): string[] {
+  switch (incident.recommendedAction?.type) {
+    case "restart_redis":
+      return [
+        "Redis restarted",
+        `${incident.service} recovering`,
+        "Recovery verified",
+      ];
+    case "recover_database":
+      return [
+        "Connection pool recovered",
+        `${incident.service} recovering`,
+        "Recovery verified",
+      ];
+    default:
+      return [
+        "Deployment rolled back",
+        `${incident.service} restarted`,
+        "Recovery verified",
+      ];
+  }
+}
+
+function describeFix(action: NonNullable<Incident["recommendedAction"]>): string {
+  switch (action.type) {
+    case "restart_redis":
+      return "Restart Redis";
+    case "recover_database":
+      return "Recover the database connection pool";
+    default:
+      return `Rollback ${action.service ?? "deployment"} ${action.target}`;
+  }
+}
+
+function describeExecuting(
+  action: Incident["recommendedAction"] | undefined,
+): string {
+  switch (action?.type) {
+    case "restart_redis":
+      return "Restarting Redis…";
+    case "recover_database":
+      return "Recovering the database…";
+    default:
+      return "Executing rollback…";
+  }
+}
 
 type UiPhase =
   | "ready"
@@ -62,7 +106,7 @@ export function IncidentDetailClient({
   const [error, setError] = useState<string | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [progressStep, setProgressStep] = useState(
-    initial.status === "resolved" ? recoverySteps.length : -1,
+    initial.status === "resolved" ? RECOVERY_STEP_COUNT : -1,
   );
 
   function sync(next: Incident) {
@@ -153,6 +197,7 @@ export function IncidentDetailClient({
       "getDeployments",
       "getMetrics",
       "getPreviousIncidents",
+      "getIncidentHistory",
     ] as const;
 
     type CheckItem = {
@@ -250,20 +295,25 @@ export function IncidentDetailClient({
                   : "border-critical/25 bg-critical-soft text-critical",
               )}
             >
-              {phase === "resolved" ? "Resolved" : "Critical"}
+              {phase === "resolved"
+                ? "Resolved"
+                : incident.severity.charAt(0).toUpperCase() +
+                  incident.severity.slice(1)}
             </span>
-            <span className="mono text-[13px] text-ink-soft">
-              Error rate:{" "}
-              <span
-                className={
-                  phase === "resolved" ? "text-healthy" : "text-critical"
-                }
-              >
-                {phase === "resolved"
-                  ? `${incident.recovery?.errorRate ?? 1}%`
-                  : `${incident.errorRate ?? 82}%`}
+            {incident.errorRate !== undefined ? (
+              <span className="mono text-[13px] text-ink-soft">
+                Error rate:{" "}
+                <span
+                  className={
+                    phase === "resolved" ? "text-healthy" : "text-critical"
+                  }
+                >
+                  {phase === "resolved"
+                    ? `${incident.recovery?.errorRate ?? 1}%`
+                    : `${incident.errorRate}%`}
+                </span>
               </span>
-            </span>
+            ) : null}
           </div>
         </header>
 
@@ -313,6 +363,16 @@ export function IncidentDetailClient({
               </button>
             </div>
           )}
+          {(incident.investigation?.historyRecordIds?.length ?? 0) > 0 ? (
+            <p className="mt-3 text-[12.5px] text-muted">
+              Considered {incident.investigation?.historyRecordIds?.length}{" "}
+              similar past incident
+              {incident.investigation?.historyRecordIds?.length === 1
+                ? ""
+                : "s"}{" "}
+              as context. Current evidence decides.
+            </p>
+          ) : null}
         </section>
 
         {incident.rootCause &&
@@ -355,7 +415,7 @@ export function IncidentDetailClient({
             <>
               <div className="section-label">Recommended Fix</div>
               <h3 className="display mt-2 text-[26px] text-ink">
-                Rollback deployment {incident.recommendedAction.target}
+                {describeFix(incident.recommendedAction)}
               </h3>
               <p className="mt-2 text-[13px] text-muted">
                 Risk:{" "}
@@ -384,13 +444,13 @@ export function IncidentDetailClient({
               <div className="section-label">Recovery</div>
               <div className="flex items-center gap-2 text-[16px] text-ink">
                 <LoaderCircle className="h-4 w-4 animate-spin text-accent" />
-                Executing rollback…
+                {describeExecuting(incident.recommendedAction)}
               </div>
               <div className="h-0.5 overflow-hidden bg-paper-muted">
                 <div className="h-full w-1/3 bg-accent animate-progress" />
               </div>
               <ul className="space-y-2.5">
-                {recoverySteps.map((label, index) => {
+                {recoveryStepLabels(incident).map((label, index) => {
                   const done = index < progressStep;
                   const current = index === progressStep;
                   return (
@@ -425,25 +485,30 @@ export function IncidentDetailClient({
                 </div>
               </div>
               <h3 className="display text-[28px] text-ink">
-                Payment Service is healthy
+                {incident.service} is healthy
               </h3>
-              <div className="grid gap-px border border-line bg-line sm:grid-cols-2">
-                <div className="bg-paper px-4 py-3.5">
-                  <div className="section-label">Error rate</div>
-                  <div className="mono mt-1.5 text-[14px] text-ink">
-                    {incident.errorRate && incident.errorRate > 5
-                      ? incident.errorRate
-                      : 82}
-                    % → {incident.recovery?.errorRate ?? 1}%
+              {incident.errorRate !== undefined ? (
+                <div className="grid gap-px border border-line bg-line sm:grid-cols-2">
+                  <div className="bg-paper px-4 py-3.5">
+                    <div className="section-label">Error rate</div>
+                    <div className="mono mt-1.5 text-[14px] text-ink">
+                      {incident.errorRate}% → {incident.recovery?.errorRate ?? 1}%
+                    </div>
                   </div>
+                  {incident.service === "Payment Service" ? (
+                    <div className="bg-paper px-4 py-3.5">
+                      <div className="section-label">Payment success</div>
+                      <div className="mono mt-1.5 text-[14px] text-ink">
+                        18% → {incident.recovery?.paymentSuccessRate ?? 99}%
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-                <div className="bg-paper px-4 py-3.5">
-                  <div className="section-label">Payment success</div>
-                  <div className="mono mt-1.5 text-[14px] text-ink">
-                    18% → {incident.recovery?.paymentSuccessRate ?? 99}%
-                  </div>
-                </div>
-              </div>
+              ) : incident.recovery?.result ? (
+                <p className="text-[14px] text-ink-soft">
+                  {incident.recovery.result}
+                </p>
+              ) : null}
               <p className="text-[14px] text-healthy">Recovery verified</p>
               <Link
                 href={`/reports/${incident.id}`}
@@ -549,6 +614,13 @@ function buildEvidenceItems(incident: Incident): Array<{
       id: "e5",
       title: "Previous Incidents",
       summary: summarizeUnknown(bag.getPreviousIncidents),
+    });
+  }
+  if (Array.isArray(bag.getIncidentHistory) && bag.getIncidentHistory.length) {
+    items.push({
+      id: "e6",
+      title: "Learned From History",
+      summary: `${bag.getIncidentHistory.length} similar resolved incident${bag.getIncidentHistory.length === 1 ? "" : "s"} (context only)`,
     });
   }
 

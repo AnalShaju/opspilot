@@ -1,14 +1,14 @@
-import { getIncidentReport } from "@/lib/incidents/incidentService";
 import { handleRouteError, jsonOk } from "@/lib/api/http";
+import { resilienceTestService } from "@/lib/services/resilience-test.service";
 
+/** GET /api/resilience-tests/:id — current state, derived from real execution. */
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await context.params;
-    const report = await getIncidentReport(id);
-    return jsonOk({ report });
+    return jsonOk({ test: await resilienceTestService.getTest(id) });
   } catch (error) {
     return handleRouteError(error);
   }
