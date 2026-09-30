@@ -13,6 +13,7 @@ import {
 import {
   approveIncident,
   fetchIncident,
+  fetchSimulatorHealth,
   investigateIncident,
 } from "@/lib/api/client";
 import type { Incident } from "@/lib/types/incident";
@@ -108,12 +109,37 @@ export function IncidentDetailClient({
   const [progressStep, setProgressStep] = useState(
     initial.status === "resolved" ? RECOVERY_STEP_COUNT : -1,
   );
+  const [simulatorStillFailing, setSimulatorStillFailing] = useState(false);
 
   function sync(next: Incident) {
     setIncident(next);
     onIncidentChange(next);
     setPhase(mapStatus(next.status));
   }
+
+  // After resolve, confirm the live simulator still looks healthy.
+  useEffect(() => {
+    if (phase !== "resolved") {
+      setSimulatorStillFailing(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const live = await fetchSimulatorHealth();
+        if (!cancelled) {
+          setSimulatorStillFailing(
+            live.healthy === false || Boolean(live.activeScenario),
+          );
+        }
+      } catch {
+        if (!cancelled) setSimulatorStillFailing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, incident.id]);
 
   // Auto-start investigation for new/detected incidents.
   // Shared in-flight promise avoids React Strict Mode double-calls.
@@ -510,6 +536,14 @@ export function IncidentDetailClient({
                 </p>
               ) : null}
               <p className="text-[14px] text-healthy">Recovery verified</p>
+              {simulatorStillFailing ? (
+                <p className="border border-critical/25 bg-critical-soft px-3.5 py-3 text-[13px] text-critical">
+                  OpsPilot verified recovery for this incident, but the simulator
+                  currently reports another active failure. Click{" "}
+                  <span className="font-medium">Refresh</span> on the simulator —
+                  or avoid clicking a red failure button after Approve &amp; Fix.
+                </p>
+              ) : null}
               <Link
                 href={`/reports/${incident.id}`}
                 className="inline-flex border border-line px-3.5 py-2.5 text-[13px] text-ink transition-colors duration-150 hover:bg-paper-muted"

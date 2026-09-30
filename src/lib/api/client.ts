@@ -78,6 +78,15 @@ export async function fetchIncidentHistory(): Promise<IncidentHistoryRecord[]> {
   return data.records;
 }
 
+export async function fetchSimulatorHealth(): Promise<{
+  healthy: boolean;
+  activeScenario: string | null;
+  recovered: boolean | null;
+}> {
+  const response = await fetch("/api/simulator/health", { cache: "no-store" });
+  return parseJson(response);
+}
+
 export async function fetchResilience(): Promise<{
   scenarios: ResilienceScenarioDefinition[];
   tests: ResilienceTest[];

@@ -583,6 +583,25 @@ export async function approveAndRemediate(
     throw error;
   }
 
+  if (actionResult && actionResult.success === false) {
+    const message =
+      actionResult.message ??
+      `${action.type} was rejected by the simulator`;
+    const failed = await updateIncident(incidentId, {
+      status: "failed",
+      recovery: {
+        action: action.type,
+        target: action.target,
+        executed: false,
+        executedAt: new Date().toISOString(),
+        result: message,
+        verificationRaw: actionResult,
+      },
+    });
+    if (failed) await incidentHistoryService.recordOutcome(failed);
+    throw new Error(message);
+  }
+
   logEvent("REMEDIATION_COMPLETED", {
     incidentId,
     action: action.type,
@@ -604,9 +623,23 @@ export async function approveAndRemediate(
     recovery: executedRecovery,
   });
 
+  const affectedService =
+    action.service ??
+    (action.type === "restart_redis"
+      ? "Redis"
+      : action.type === "recover_database"
+        ? "Database"
+        : existing.service);
+
+  // Re-read health after remediation. Retry once briefly — some simulator
+  // builds clear the scenario a moment after returning 200.
   let health: SimulatorHealth;
   try {
     health = await verifyHealth();
+    if (!evaluateHealth(health, affectedService) || health.activeScenario) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      health = await verifyHealth();
+    }
   } catch (error) {
     const failed = await verificationFailed(
       incidentId,
@@ -617,14 +650,6 @@ export async function approveAndRemediate(
     if (failed) await incidentHistoryService.recordOutcome(failed);
     throw error;
   }
-
-  const affectedService =
-    existing.recommendedAction?.service ??
-    (existing.recommendedAction?.type === "restart_redis"
-      ? "Redis"
-      : existing.recommendedAction?.type === "recover_database"
-        ? "Database"
-        : existing.service);
 
   const recovered = evaluateHealth(health, affectedService);
 
