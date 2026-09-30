@@ -2,15 +2,12 @@
 
 import { useEffect } from "react";
 import { X } from "lucide-react";
-import type { EvidenceItem } from "@/data/types";
 
-const compactLines: Record<string, string> = {
-  e1: "Payment DB connection timeout",
-  e2: "Error rate 2% → 82%",
-  e3: "v1.8.4 · Payment Service",
-  e4: "Payment unhealthy · Database healthy · Provider healthy",
-  e5: "Similar deployment rollback resolved the issue",
-};
+export interface DrawerEvidenceItem {
+  id: string;
+  title: string;
+  summary: string;
+}
 
 export function EvidenceDrawer({
   open,
@@ -19,7 +16,7 @@ export function EvidenceDrawer({
 }: {
   open: boolean;
   onClose: () => void;
-  evidence: EvidenceItem[];
+  evidence: DrawerEvidenceItem[];
 }) {
   useEffect(() => {
     if (!open) return;
@@ -41,7 +38,7 @@ export function EvidenceDrawer({
         onClick={onClose}
       />
       <aside
-        className="relative flex h-full w-full max-w-md flex-col border-l border-line bg-paper shadow-none animate-fade-in"
+        className="relative flex h-full w-full max-w-md flex-col border-l border-line bg-paper animate-fade-in"
         role="dialog"
         aria-modal="true"
         aria-label="Evidence"
@@ -64,14 +61,22 @@ export function EvidenceDrawer({
         </div>
 
         <ul className="flex-1 overflow-y-auto divide-y divide-line">
-          {evidence.map((item) => (
-            <li key={item.id} className="px-5 py-4">
-              <div className="text-[13px] font-medium text-ink">{item.title}</div>
-              <div className="mt-1 text-[13px] leading-relaxed text-muted">
-                {compactLines[item.id] ?? item.summary}
-              </div>
+          {evidence.length === 0 ? (
+            <li className="px-5 py-8 text-[13px] text-muted">
+              No evidence collected yet.
             </li>
-          ))}
+          ) : (
+            evidence.map((item) => (
+              <li key={item.id} className="px-5 py-4">
+                <div className="text-[13px] font-medium text-ink">
+                  {item.title}
+                </div>
+                <div className="mt-1 text-[13px] leading-relaxed text-muted">
+                  {item.summary}
+                </div>
+              </li>
+            ))
+          )}
         </ul>
       </aside>
     </div>

@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OpsPilot — AI Incident Commander
 
-## Getting Started
+Hackathon app: frontend + backend + DeepSeek incident agent.
 
-First, run the development server:
+The production **simulator is a separate project**. This app talks to it over HTTP.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```
+Frontend
+   ↓
+Next.js API (/api/incidents/...)
+   ↓
+Incident Service
+   ↓
+DeepSeek Incident Agent
+   ↓
+Controlled Tools (getLogs, getDeployments, ...)
+   ↓
+Simulator (SIMULATOR_URL)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Human approval is required before any rollback.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.example` → `.env.local`:
 
-## Learn More
+```env
+DEEPSEEK_API_KEY=your_key
+SIMULATOR_URL=http://localhost:3001
+USE_MOCK_SIMULATOR=false
+```
 
-To learn more about Next.js, take a look at the following resources:
+Set `USE_MOCK_SIMULATOR=true` only when the simulator is offline (local fake data).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Run
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+# Terminal 1 — teammate simulator
+# (in the simulator project)
+npm run start   # typically :3001
 
-## Deploy on Vercel
+# Terminal 2 — OpsPilot
+npm install
+npm run dev     # :3000
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Open http://localhost:3000
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Demo flow
+
+1. Reset / fail Payment Service in the simulator
+2. Open OpsPilot overview → **Investigate Incident**
+3. DeepSeek calls tools and returns root cause + rollback recommendation
+4. Click **Approve & Fix**
+5. Backend rolls back via simulator and verifies health
+6. Incident resolves → report available
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/demo/bootstrap` | Ensure demo incident exists |
+| GET/POST | `/api/incidents` | List / create |
+| GET | `/api/incidents/:id` | Get one |
+| POST | `/api/incidents/:id/investigate` | DeepSeek tool-calling investigation |
+| POST | `/api/incidents/:id/approve` | Human approval → rollback → verify |
+| GET | `/api/incidents/:id/report` | Structured report |
+
+## Tools (AI-readable only)
+
+- `getServices` → `GET /services`
+- `getLogs` → `GET /logs`
+- `getMetrics` → `GET /metrics`
+- `getDeployments` → `GET /deployments`
+- `getPreviousIncidents` → `GET /incidents`
+
+## Remediation (human-approved only)
+
+- `rollbackDeployment(version)` → `POST /actions/rollback`
+- `verifyHealth()` → `GET /health`
+
+## Test
+
+```bash
+npm run test:api
+```
+
+## Safety
+
+- `DEEPSEEK_API_KEY` is server-only
+- Browser never calls rollback directly
+- AI cannot invent remediations outside allowlisted `rollback`
+- AI output is validated before storage
