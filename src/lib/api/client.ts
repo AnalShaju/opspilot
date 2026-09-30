@@ -45,11 +45,25 @@ export async function fetchIncidents(): Promise<Incident[]> {
 }
 
 export async function investigateIncident(id: string): Promise<Incident> {
-  const response = await fetch(`/api/incidents/${id}/investigate`, {
-    method: "POST",
-  });
-  const data = await parseJson<{ incident: Incident }>(response);
-  return data.incident;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 55000);
+  try {
+    const response = await fetch(`/api/incidents/${id}/investigate`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    const data = await parseJson<{ incident: Incident }>(response);
+    return data.incident;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        "Investigation timed out. On Vercel, set SIMULATOR_URL to a public simulator https URL (not localhost), or set USE_MOCK_SIMULATOR=true.",
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export async function approveIncident(

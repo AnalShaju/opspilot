@@ -269,7 +269,6 @@ function enqueueProgress(
   incidentId: string,
   steps: InvestigationStep[],
 ): void {
-  // Keep only the newest snapshot; drop intermediate writes that haven't started.
   pendingSteps.set(incidentId, steps);
   const previous = progressQueues.get(incidentId) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(async () => {
@@ -288,6 +287,10 @@ function enqueueProgress(
   );
 }
 
+async function flushProgress(incidentId: string): Promise<void> {
+  await (progressQueues.get(incidentId) ?? Promise.resolve());
+}
+
 export async function runIncidentAgent(
   incident: Incident,
   overrides: Partial<AgentDependencies> = {},
@@ -300,6 +303,9 @@ export async function runIncidentAgent(
   const { evidence, steps } = await deps.collectEvidence({
     onProgress: deps.onProgress,
   });
+  // Make sure the UI sees evidence as complete before the (slow) AI call.
+  deps.onProgress(steps.map((s) => ({ ...s })));
+  await flushProgress(incident.id);
 
   const detectedIncidentType = classifyIncidentType(evidence);
 
@@ -311,6 +317,7 @@ export async function runIncidentAgent(
   };
   steps.push(historyStep);
   deps.onProgress(steps.map((s) => ({ ...s })));
+  await flushProgress(incident.id);
 
   const historyUsed = await deps.getHistory(incident, detectedIncidentType);
 

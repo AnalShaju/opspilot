@@ -11,7 +11,7 @@ import { resetMockSimulatorState } from "@/lib/simulator/mock";
 import { simulatorDetailMessage } from "@/lib/simulator/normalize";
 import { SimulatorError } from "@/lib/types/simulator";
 
-const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = 5000;
 
 function isMockSimulatorEnabled(): boolean {
   return process.env.USE_MOCK_SIMULATOR === "true";
