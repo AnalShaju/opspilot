@@ -59,33 +59,56 @@ async function waitFor(label, fn, timeoutMs = 120_000, intervalMs = 1000) {
   }
 }
 
-async function testDemoFlow() {
-  console.log("── Demo incident flow");
-  const boot = await request("/api/demo/bootstrap", { method: "POST" });
-  assert(boot.status === 200, `Bootstrap failed: ${JSON.stringify(boot.json)}`);
-  const incidentId = boot.json.incident.id;
-  console.log(`✓ Bootstrap incident (${incidentId})`);
-
-  console.log("… DeepSeek investigation (evidence + history + ONE call)");
-  const investigated = await request(`/api/incidents/${incidentId}/investigate`, {
+async function testDynamicIncidentFlow() {
+  console.log("── Dynamic incident flow (NOT payment-default)");
+  // Trigger a Redis failure via the public resilience trigger so we prove
+  // OpsPilot follows the simulator, not a hardcoded Payment incident.
+  const started = await request("/api/resilience-tests", {
     method: "POST",
+    body: JSON.stringify({ scenarioId: "ORDERS_REDIS_FAILURE" }),
   });
   assert(
-    investigated.status === 200,
-    `Investigate failed: ${investigated.status} ${JSON.stringify(investigated.json)}`,
+    started.status === 201,
+    `Trigger failed: ${started.status} ${JSON.stringify(started.json)}`,
   );
-  const incident = investigated.json.incident;
-  assert(incident.rootCause, "Missing AI rootCause");
-  assert(incident.recommendedAction?.type, "Missing recommended action");
+  const incidentId = started.json.test.incidentId;
+  assert(incidentId, "Missing incidentId from resilience trigger");
+  console.log(`✓ Simulator Redis failure synced as incident (${incidentId})`);
+
+  const listed = await request("/api/incidents");
+  assert(listed.status === 200, "List incidents failed");
+  const listedIncident = listed.json.incidents.find((i) => i.id === incidentId);
+  assert(listedIncident, "Triggered incident missing from /api/incidents");
   assert(
-    incident.investigation?.aiCallCount === 1,
-    `Expected exactly 1 AI call, got ${incident.investigation?.aiCallCount}`,
+    /redis|orders/i.test(listedIncident.service),
+    `Expected Redis/Orders service, got ${listedIncident.service}`,
+  );
+  console.log(`✓ Incident list shows ${listedIncident.service} (not forced Payment)`);
+
+  const awaiting = await waitFor("investigation to finish", async () => {
+    const { json } = await request(`/api/incidents/${incidentId}`);
+    const incident = json.incident;
+    if (incident.status === "investigation_failed") {
+      throw new Error(`Investigation failed: ${incident.investigation?.error}`);
+    }
+    return incident.status === "awaiting_approval" ? incident : null;
+  });
+
+  assert(awaiting.rootCause, "Missing AI rootCause");
+  assert(awaiting.recommendedAction?.type, "Missing recommended action");
+  assert(
+    awaiting.investigation?.aiCallCount === 1,
+    `Expected exactly 1 AI call, got ${awaiting.investigation?.aiCallCount}`,
+  );
+  assert(
+    awaiting.recommendedAction.type === "restart_redis",
+    `Expected restart_redis for Redis failure, got ${awaiting.recommendedAction.type}`,
   );
   console.log(
-    `✓ ${incident.recommendedAction.type} ${incident.recommendedAction.target} — ${Math.round(incident.rootCause.confidence * 100)}%`,
+    `✓ ${awaiting.recommendedAction.type} ${awaiting.recommendedAction.target} — ${Math.round(awaiting.rootCause.confidence * 100)}%`,
   );
   console.log(
-    `  history used: ${incident.investigation.historyRecordIds?.length ?? 0} record(s)`,
+    `  history used: ${awaiting.investigation.historyRecordIds?.length ?? 0} record(s)`,
   );
 
   const approved = await request(`/api/incidents/${incidentId}/approve`, {
@@ -107,6 +130,10 @@ async function testDemoFlow() {
   assert(history.status === 200, "History list failed");
   const saved = history.json.records.find((r) => r.incidentId === incidentId);
   assert(saved, "Resolved incident was not saved to history");
+  assert(
+    saved.actionType === "restart_redis",
+    `History should record restart_redis, got ${saved.actionType}`,
+  );
   console.log(`✓ Saved to history (${saved.id}: ${saved.actionType} ${saved.actionTarget})`);
 
   const one = await request(`/api/incidents/history/${saved.id}`);
@@ -172,7 +199,7 @@ async function testResilience(scenarioId) {
 async function main() {
   console.log(`Testing OpsPilot at ${BASE}\n`);
 
-  await testDemoFlow();
+  await testDynamicIncidentFlow();
   console.log("");
 
   for (const scenario of SCENARIOS) {

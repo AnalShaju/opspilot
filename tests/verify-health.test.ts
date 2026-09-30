@@ -52,9 +52,34 @@ describe("evaluateHealth (deterministic verification)", () => {
     );
   });
 
-  test("legacy payment-only simulators still work", () => {
-    assert.equal(evaluateHealth({ paymentService: "healthy", errorRate: 1 }), true);
-    assert.equal(evaluateHealth({ paymentService: "failing", errorRate: 82 }), false);
+  test("checks the affected service when provided", () => {
+    assert.equal(
+      evaluateHealth(
+        {
+          recovered: true,
+          activeScenario: null,
+          services: { Redis: "unhealthy", "Payment Service": "healthy" },
+        },
+        "Redis",
+      ),
+      false,
+    );
+    assert.equal(
+      evaluateHealth(
+        {
+          recovered: true,
+          activeScenario: null,
+          services: { Redis: "healthy", "Payment Service": "healthy" },
+        },
+        "Redis",
+      ),
+      true,
+    );
+  });
+
+  test("generic status/errorRate fallback does not require Payment", () => {
+    assert.equal(evaluateHealth({ status: "healthy", errorRate: 1 }), true);
+    assert.equal(evaluateHealth({ errorRate: 82 }), false);
   });
 });
 

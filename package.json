@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/register-alias.mjs --test \"tests/**/*.test.ts\"",
-    "test:api": "node scripts/test-api.mjs"
+    "test:api": "node scripts/test-api.mjs",
+    "test:supabase": "node --env-file=.env.local scripts/test-supabase.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

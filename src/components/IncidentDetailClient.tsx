@@ -497,7 +497,7 @@ export function IncidentDetailClient({
                   </div>
                   {incident.recovery?.paymentSuccessRate !== undefined ? (
                     <div className="bg-paper px-4 py-3.5">
-                      <div className="section-label">Payment success</div>
+                      <div className="section-label">Success rate</div>
                       <div className="mono mt-1.5 text-[14px] text-ink">
                         {incident.recovery.paymentSuccessRate}%
                       </div>

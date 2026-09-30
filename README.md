@@ -61,18 +61,19 @@ Open http://localhost:3000
 
 ## Demo flow
 
-1. Reset / trigger a scenario in the simulator (Payment is the default demo)
-2. Open OpsPilot overview → **Investigate Incident**
-3. OpsPilot collects evidence, then DeepSeek returns one diagnosis (root cause + recommended action)
+1. Trigger a failure in the simulator (any scenario) or start a Resilience Test
+2. Open OpsPilot — it syncs open incidents from the simulator (any service)
+3. Open an incident → OpsPilot collects evidence, then DeepSeek returns one diagnosis
 4. Click **Approve & Fix**
 5. Backend runs the approved remediation via the simulator and verifies health
-6. Incident resolves → report available
+6. Incident resolves → report / history available
 
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/demo/bootstrap` | Ensure demo incident exists |
+| POST | `/api/incidents/sync` | Sync open simulator incidents into OpsPilot |
+| POST | `/api/demo/bootstrap` | Compat alias for sync (returns primary active incident) |
 | GET/POST | `/api/incidents` | List / create |
 | GET | `/api/incidents/:id` | Get one |
 | POST | `/api/incidents/:id/investigate` | Collect evidence + one DeepSeek diagnosis |

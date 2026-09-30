@@ -98,4 +98,4 @@ export async function simulatorPost<T>(
 }
 
 /** Exposed for tests that need a clean mock rollback state. */
-export { resetMockSimulatorState, isMockSimulatorEnabled, getBaseUrl };
+export { resetMockSimulatorState, isMockSimulatorEnabled };

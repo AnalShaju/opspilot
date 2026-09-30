@@ -4,24 +4,45 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { LoaderCircle } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { bootstrapDemoIncident, fetchIncidents } from "@/lib/api/client";
+import { fetchIncidents, syncIncidents } from "@/lib/api/client";
 import type { Incident } from "@/lib/types/incident";
 import { cn } from "@/lib/utils";
 
 type Filter = "all" | "active" | "resolved";
 
+function isActive(incident: Incident): boolean {
+  return (
+    incident.status !== "resolved" &&
+    incident.status !== "failed" &&
+    incident.status !== "investigation_failed"
+  );
+}
+
 export default function IncidentsPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        await bootstrapDemoIncident();
-        const list = await fetchIncidents();
-        if (!cancelled) setIncidents(list);
+        const synced = await syncIncidents();
+        const list =
+          synced.incidents.length > 0
+            ? synced.incidents
+            : await fetchIncidents();
+        if (!cancelled) {
+          setIncidents(list);
+          if ((synced.activeIncidents?.length ?? 0) > 0) {
+            setFilter("active");
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load incidents");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -33,7 +54,7 @@ export default function IncidentsPage() {
 
   const filtered = useMemo(() => {
     if (filter === "active") {
-      return incidents.filter((i) => i.status !== "resolved");
+      return incidents.filter(isActive);
     }
     if (filter === "resolved") {
       return incidents.filter((i) => i.status === "resolved");
@@ -47,7 +68,8 @@ export default function IncidentsPage() {
         <div className="section-label">What happened</div>
         <h2 className="display mt-2 text-[36px] text-ink">Incidents</h2>
         <p className="mt-2 text-[15px] text-muted">
-          Open an incident to follow OpsPilot’s investigation.
+          Synced from the simulator. Open any incident to investigate that
+          service — selection is never forced to Payment.
         </p>
       </header>
 
@@ -78,7 +100,11 @@ export default function IncidentsPage() {
       {loading ? (
         <div className="flex items-center gap-2 text-[13px] text-muted">
           <LoaderCircle className="h-4 w-4 animate-spin text-accent" />
-          Loading incidents…
+          Syncing incidents…
+        </div>
+      ) : error ? (
+        <div className="panel px-5 py-8 text-center text-[13.5px] text-critical">
+          {error}
         </div>
       ) : (
         <ul className="space-y-3">
@@ -109,6 +135,9 @@ export default function IncidentsPage() {
                   {incident.service}
                 </div>
                 <div className="mt-1 text-[13.5px] text-muted">
+                  {incident.title}
+                </div>
+                <div className="mt-1 text-[12.5px] text-faint">
                   {incident.description}
                 </div>
               </Link>
@@ -116,7 +145,8 @@ export default function IncidentsPage() {
           ))}
           {filtered.length === 0 ? (
             <li className="panel px-5 py-8 text-center text-[13.5px] text-muted">
-              No incidents match this filter.
+              No incidents match this filter. Trigger a simulator failure or run
+              a Resilience Test.
             </li>
           ) : null}
         </ul>

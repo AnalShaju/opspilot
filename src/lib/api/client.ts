@@ -17,10 +17,19 @@ async function parseJson<T>(response: Response): Promise<T> {
   return data;
 }
 
-export async function bootstrapDemoIncident(): Promise<Incident> {
-  const response = await fetch("/api/demo/bootstrap", { method: "POST" });
-  const data = await parseJson<{ incident: Incident }>(response);
-  return data.incident;
+export async function syncIncidents(): Promise<{
+  incidents: Incident[];
+  activeIncidents: Incident[];
+  created: Incident[];
+  superseded: Incident[];
+  incident: Incident | null;
+  openSimulatorCount: number;
+}> {
+  const response = await fetch("/api/incidents/sync", {
+    method: "POST",
+    cache: "no-store",
+  });
+  return parseJson(response);
 }
 
 export async function fetchIncident(id: string): Promise<Incident> {

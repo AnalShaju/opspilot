@@ -37,9 +37,14 @@ export const INCIDENT_TYPES = [
 export type IncidentType = (typeof INCIDENT_TYPES)[number];
 
 /** Where an incident came from. */
-export type IncidentSource = "demo" | "resilience_test" | "manual";
+export type IncidentSource =
+  | "demo"
+  | "resilience_test"
+  | "manual"
+  | "simulator";
 
 export type ActionRisk = "low" | "medium" | "high";
+
 
 export interface RootCause {
   summary: string;
@@ -136,6 +141,8 @@ export interface Incident {
   source?: IncidentSource;
   /** Simulator scenario that produced this incident (record-keeping only). */
   scenarioId?: string;
+  /** Id of the corresponding open incident in the simulator, when known. */
+  simulatorIncidentId?: string;
   resilienceTestId?: string;
   investigation?: IncidentInvestigation;
   rootCause?: RootCause;
@@ -154,5 +161,6 @@ export interface CreateIncidentInput {
   incidentType?: IncidentType;
   source?: IncidentSource;
   scenarioId?: string;
+  simulatorIncidentId?: string;
   resilienceTestId?: string;
 }

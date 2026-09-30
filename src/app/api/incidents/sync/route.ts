@@ -5,19 +5,25 @@ import {
 import { handleRouteError, jsonOk } from "@/lib/api/http";
 
 /**
- * Sync open simulator incidents into OpsPilot (any service).
- * Compatibility alias for older clients that still POST /api/demo/bootstrap.
+ * Sync open incidents from the simulator into OpsPilot.
+ * Does not invent a Payment demo — only materializes what the simulator reports.
+ *
+ * Response:
+ * - incidents: full OpsPilot list after sync
+ * - activeIncidents: OpsPilot records linked to currently-open simulator incidents
+ * - created: newly created from open simulator incidents
+ * - incident: most recent of activeIncidents (any service), or null
  */
 export async function POST() {
   try {
     const synced = await syncIncidentsFromSimulator();
     return jsonOk({
-      incident: pickPrimaryActiveIncident(synced.activeIncidents),
       incidents: synced.incidents,
       activeIncidents: synced.activeIncidents,
       created: synced.created,
       superseded: synced.superseded,
       openSimulatorCount: synced.openSimulatorCount,
+      incident: pickPrimaryActiveIncident(synced.activeIncidents),
     });
   } catch (error) {
     return handleRouteError(error);

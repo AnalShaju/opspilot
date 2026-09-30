@@ -69,9 +69,6 @@ export interface SimulatorActionResult {
   [key: string]: unknown;
 }
 
-/** @deprecated use SimulatorActionResult */
-export type SimulatorRollbackResult = SimulatorActionResult;
-
 export interface SimulatorScenarioResult {
   success: boolean;
   scenarioId?: string;

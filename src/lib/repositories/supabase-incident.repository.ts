@@ -111,6 +111,7 @@ function snapshotPayload(incident: Incident): Record<string, unknown> {
     errorRate: incident.errorRate,
     source: incident.source,
     scenarioId: incident.scenarioId,
+    simulatorIncidentId: incident.simulatorIncidentId,
     resilienceTestId: incident.resilienceTestId,
     incidentType: incident.incidentType,
     rootCause: incident.rootCause,
@@ -143,6 +144,10 @@ function applySnapshot(
         : base.source,
     scenarioId:
       typeof snapshot.scenarioId === "string" ? snapshot.scenarioId : base.scenarioId,
+    simulatorIncidentId:
+      typeof snapshot.simulatorIncidentId === "string"
+        ? snapshot.simulatorIncidentId
+        : base.simulatorIncidentId,
     resilienceTestId:
       typeof snapshot.resilienceTestId === "string"
         ? snapshot.resilienceTestId

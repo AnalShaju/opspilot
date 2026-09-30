@@ -7,7 +7,6 @@
  */
 
 import {
-  RESILIENCE_SCENARIO_IDS,
   type ResilienceScenarioDefinition,
   type ResilienceScenarioId,
 } from "@/lib/types/resilience";
@@ -44,13 +43,6 @@ export const RESILIENCE_SCENARIOS: readonly ResilienceScenarioDefinition[] = [
     expectedActionType: "recover_database",
   },
 ] as const;
-
-export function isScenarioId(value: unknown): value is ResilienceScenarioId {
-  return (
-    typeof value === "string" &&
-    (RESILIENCE_SCENARIO_IDS as readonly string[]).includes(value)
-  );
-}
 
 export function getScenario(
   id: string,

@@ -52,10 +52,6 @@ export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
 
 const SEVERITIES: IncidentSeverity[] = ["low", "medium", "high", "critical"];
 
-// ---------------------------------------------------------------------------
-// Pure derivation: incident record -> resilience test stages
-// ---------------------------------------------------------------------------
-
 function terminal(test: ResilienceTest): boolean {
   return test.overallStatus !== "running";
 }
@@ -104,7 +100,7 @@ export function deriveTestFromIncident(
   const nowIso = new Date(nowMs).toISOString();
   const { recommendedAction: rec, approval, recovery } = incident;
 
-  // --- Investigation + recommendation -------------------------------------
+  // --- Investigation + recommendation ---
   const investigated = !!incident.rootCause && !!rec;
 
   if (incident.status === "investigation_failed") {
@@ -130,7 +126,7 @@ export function deriveTestFromIncident(
     next.investigationStatus = "in_progress";
   }
 
-  // --- Approval -----------------------------------------------------------
+  // --- Approval ---
   if (!terminal(next) && investigated) {
     if (approval?.approved === true) {
       next.approvalStatus = "passed";
@@ -161,7 +157,7 @@ export function deriveTestFromIncident(
     }
   }
 
-  // --- Remediation --------------------------------------------------------
+  // --- Remediation ---
   if (!terminal(next) && recovery) {
     if (recovery.executed === true) {
       next.remediationStatus = "passed";
@@ -185,7 +181,7 @@ export function deriveTestFromIncident(
     next.remediationStatus = "in_progress";
   }
 
-  // --- Verification -------------------------------------------------------
+  // --- Verification ---
   if (!terminal(next) && recovery?.executed === true) {
     if (recovery.verified === true) {
       const verifiedAt = recovery.verifiedAt ?? nowIso;
@@ -215,7 +211,7 @@ export function deriveTestFromIncident(
     }
   }
 
-  // --- Evaluation (grading only) -----------------------------------------
+  // --- Evaluation (grading only) ---
   next.evaluation.actualIncidentType = incident.incidentType ?? null;
   next.evaluation.actualActionType = rec?.type ?? null;
   next.evaluation.incidentTypeMatched =
@@ -479,6 +475,7 @@ export function createResilienceTestService(
         severity,
         source: "resilience_test",
         scenarioId: scenario.id,
+        simulatorIncidentId: detected.id ? String(detected.id) : undefined,
         resilienceTestId: test.testId,
       });
 

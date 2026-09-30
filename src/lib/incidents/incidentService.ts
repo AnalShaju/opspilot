@@ -23,25 +23,114 @@ import {
   updateIncident,
 } from "@/lib/incidents/incidentStore";
 import { logEvent } from "@/lib/logging";
-import { getResilienceTestRepository } from "@/lib/repositories";
 import { generateIncidentReport } from "@/lib/reports/reportService";
 import { incidentHistoryService } from "@/lib/services/incident-history.service";
 import {
   evaluateHealth,
   executeRemediation,
   getDeployments,
+  getPreviousIncidents,
   isAllowedAction,
-  prepareDemoScenario,
-  DEMO_SCENARIO_ID,
   verifyHealth,
 } from "@/lib/tools";
 import type { InvestigationStep } from "@/lib/types/agent";
 import type {
   CreateIncidentInput,
   Incident,
+  IncidentSeverity,
   Recovery,
 } from "@/lib/types/incident";
-import type { SimulatorHealth } from "@/lib/types/simulator";
+import type {
+  SimulatorHealth,
+  SimulatorPreviousIncident,
+} from "@/lib/types/simulator";
+
+const SEVERITIES: IncidentSeverity[] = ["low", "medium", "high", "critical"];
+
+function isActiveStatus(status: Incident["status"]): boolean {
+  return (
+    status !== "resolved" &&
+    status !== "failed" &&
+    status !== "investigation_failed"
+  );
+}
+
+function normalizeSeverity(value: unknown): IncidentSeverity {
+  return SEVERITIES.includes(value as IncidentSeverity)
+    ? (value as IncidentSeverity)
+    : "high";
+}
+
+function describeUnhealthy(health: SimulatorHealth | null): string | null {
+  const entries = Object.entries(health?.services ?? {}).filter(
+    ([, state]) => String(state).toLowerCase() !== "healthy",
+  );
+  if (entries.length === 0) return null;
+  return entries.map(([name, state]) => `${name} ${state}`).join(", ");
+}
+
+/**
+ * Link an OpsPilot record to a currently-open simulator incident.
+ *
+ * Prefer exact simulatorIncidentId, but the simulator often recycles the same
+ * id (e.g. INC-001) across scenarios — so also require an active status and
+ * matching service/scenario when those are known.
+ *
+ * Never reuse a progressed incident (awaiting_approval+) just because the
+ * service/scenario name matches when no simulator id is stored.
+ */
+export function matchesSimulatorIncident(
+  incident: Incident,
+  sim: SimulatorPreviousIncident,
+): boolean {
+  if (!isActiveStatus(incident.status)) return false;
+
+  if (sim.id && incident.simulatorIncidentId) {
+    if (incident.simulatorIncidentId !== String(sim.id)) return false;
+    if (
+      sim.service &&
+      incident.service &&
+      sim.service !== incident.service
+    ) {
+      return false;
+    }
+    if (
+      sim.scenario &&
+      incident.scenarioId &&
+      incident.scenarioId !== sim.scenario
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  // Without a stored sim id, only adopt early detections — never a prior
+  // investigation/approval left over from a previous episode.
+  if (incident.status !== "detected" && incident.status !== "investigating") {
+    return false;
+  }
+  if (!sim.service || incident.service !== sim.service) return false;
+  if (
+    sim.scenario &&
+    incident.scenarioId &&
+    incident.scenarioId !== sim.scenario
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isInFlightRemediation(status: Incident["status"]): boolean {
+  return status === "remediating" || status === "verifying";
+}
+
+function isSimulatorSourced(incident: Incident): boolean {
+  return (
+    incident.source === "simulator" ||
+    incident.source === "resilience_test" ||
+    incident.source === "demo"
+  );
+}
 
 export async function createIncident(
   input: CreateIncidentInput,
@@ -61,6 +150,7 @@ export async function createIncident(
     incidentType: input.incidentType,
     source: input.source ?? "manual",
     scenarioId: input.scenarioId,
+    simulatorIncidentId: input.simulatorIncidentId,
     resilienceTestId: input.resilienceTestId,
     createdAt: now,
     updatedAt: now,
@@ -70,43 +160,149 @@ export async function createIncident(
   return saveIncident(incident);
 }
 
-export async function ensureDemoIncident(): Promise<Incident> {
-  // Resilience-test incidents are never reused as the demo incident.
-  const existing = (await listIncidents()).find((item) => item.source === "demo");
+/**
+ * Pull open incidents from the simulator and materialize them in OpsPilot.
+ * Does NOT assume Payment, and does NOT trigger any scenario.
+ *
+ * `activeIncidents` are ONLY records linked to currently-open simulator
+ * incidents — stale Supabase awaiting_approval rows are superseded so they
+ * cannot override the live production picture.
+ */
+export async function syncIncidentsFromSimulator(): Promise<{
+  incidents: Incident[];
+  activeIncidents: Incident[];
+  created: Incident[];
+  superseded: Incident[];
+  openSimulatorCount: number;
+}> {
+  const [simulatorIncidents, existing, health] = await Promise.all([
+    getPreviousIncidents(),
+    listIncidents(),
+    verifyHealth().catch(() => null),
+  ]);
 
-  if (existing) {
-    // Re-arm terminal demo states so homepage → investigate works repeatedly.
-    if (
-      existing.status === "resolved" ||
-      existing.status === "failed" ||
-      existing.status === "investigation_failed"
-    ) {
-      const reset = await updateIncident(existing.id, {
-        status: "detected",
-        incidentType: undefined,
-        rootCause: undefined,
-        recommendedAction: undefined,
-        approval: undefined,
-        recovery: undefined,
-        investigation: undefined,
-        report: undefined,
-        errorRate: 82,
-        description: "500 errors detected across payment requests",
-      });
-      if (reset) return reset;
+  const open = simulatorIncidents.filter(
+    (item) => String(item.status ?? "").toLowerCase() === "open",
+  );
+
+  const created: Incident[] = [];
+  const activeIncidents: Incident[] = [];
+  const claimed = new Set<string>();
+
+  for (const sim of open) {
+    const simId =
+      sim.id != null && String(sim.id).trim() !== ""
+        ? String(sim.id)
+        : undefined;
+    const match = existing.find(
+      (item) =>
+        !claimed.has(item.id) && matchesSimulatorIncident(item, sim),
+    );
+
+    if (match) {
+      claimed.add(match.id);
+      let linked = match;
+      const scenarioId =
+        typeof sim.scenario === "string" ? sim.scenario : undefined;
+      if (
+        (simId && match.simulatorIncidentId !== simId) ||
+        (scenarioId && !match.scenarioId)
+      ) {
+        linked =
+          (await updateIncident(match.id, {
+            ...(simId ? { simulatorIncidentId: simId } : {}),
+            ...(scenarioId && !match.scenarioId
+              ? { scenarioId }
+              : {}),
+          })) ?? match;
+      }
+      activeIncidents.push(linked);
+      continue;
     }
-    return existing;
+
+    const service = sim.service?.trim() || "Unknown service";
+    const title = sim.title?.trim() || `${service} incident`;
+    const description =
+      describeUnhealthy(health) ??
+      (typeof sim.rootCause === "string" && sim.rootCause.trim()
+        ? sim.rootCause
+        : title);
+
+    const incident = await createIncident({
+      service,
+      title,
+      description,
+      severity: normalizeSeverity(sim.severity),
+      source: "simulator",
+      scenarioId:
+        typeof sim.scenario === "string" ? sim.scenario : undefined,
+      simulatorIncidentId: simId,
+    });
+    // Guarantee the simulator episode id is stored even if hydrate drops it.
+    const linked =
+      simId && incident.simulatorIncidentId !== simId
+        ? ((await updateIncident(incident.id, {
+            simulatorIncidentId: simId,
+          })) ?? incident)
+        : incident;
+    claimed.add(linked.id);
+    created.push(linked);
+    activeIncidents.push(linked);
   }
 
-  return createIncident({
-    service: "Payment Service",
-    title: "Payment Service 500 Errors",
-    description: "500 errors detected across payment requests",
-    severity: "critical",
-    errorRate: 82,
-    source: "demo",
-    scenarioId: DEMO_SCENARIO_ID,
+  const superseded: Incident[] = [];
+  for (const item of existing) {
+    if (claimed.has(item.id)) continue;
+    if (!isActiveStatus(item.status)) continue;
+    if (isInFlightRemediation(item.status)) continue;
+    if (!isSimulatorSourced(item)) continue;
+
+    const closed =
+      (await updateIncident(item.id, {
+        status: "failed",
+        investigation: {
+          ...(item.investigation ?? {
+            startedAt: item.createdAt,
+          }),
+          notes: [
+            ...(item.investigation?.notes ?? []),
+            "Superseded: simulator no longer reports this incident as open.",
+          ],
+        },
+      })) ?? item;
+    superseded.push(closed);
+  }
+
+  logEvent("INCIDENTS_SYNCED", {
+    openSimulatorCount: open.length,
+    created: created.length,
+    matched: activeIncidents.length - created.length,
+    superseded: superseded.length,
   });
+
+  return {
+    incidents: await listIncidents(),
+    activeIncidents,
+    created,
+    superseded,
+    openSimulatorCount: open.length,
+  };
+}
+
+/** Most recent incident linked to a currently-open simulator failure. */
+export function pickPrimaryActiveIncident(
+  activeIncidents: Incident[],
+): Incident | null {
+  const sorted = [...activeIncidents].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
+  return sorted[0] ?? null;
+}
+
+/** @deprecated Prefer syncIncidentsFromSimulator().activeIncidents */
+export async function getPrimaryActiveIncident(): Promise<Incident | null> {
+  const synced = await syncIncidentsFromSimulator();
+  return pickPrimaryActiveIncident(synced.activeIncidents);
 }
 
 export async function getAllIncidents(): Promise<Incident[]> {
@@ -199,14 +395,7 @@ async function runInvestigation(
   });
 
   try {
-    // Demo incident only: make sure the simulator is in the demo failure
-    // (never disturbs a scenario owned by a running Resilience Test).
-    if (existing.source === "demo") {
-      const resilienceRunning =
-        (await getResilienceTestRepository().findRunningTest()) !== null;
-      await prepareDemoScenario({ preserveActive: resilienceRunning });
-    }
-
+    // Investigate against CURRENT simulator evidence only — never re-trigger a scenario.
     const result = await runIncidentAgent(
       (await getIncident(incidentId)) ?? existing,
     );
@@ -429,11 +618,20 @@ export async function approveAndRemediate(
     throw error;
   }
 
-  const recovered = evaluateHealth(health);
+  const affectedService =
+    existing.recommendedAction?.service ??
+    (existing.recommendedAction?.type === "restart_redis"
+      ? "Redis"
+      : existing.recommendedAction?.type === "recover_database"
+        ? "Database"
+        : existing.service);
+
+  const recovered = evaluateHealth(health, affectedService);
 
   logEvent("VERIFICATION_COMPLETED", {
     incidentId,
     recovered,
+    affectedService,
     errorRate: health.errorRate,
   });
 

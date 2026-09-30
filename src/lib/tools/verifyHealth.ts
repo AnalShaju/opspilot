@@ -10,29 +10,43 @@ export async function verifyHealth(): Promise<SimulatorHealth> {
 /**
  * Decides whether production is healthy again. Deterministic, no AI.
  *
- * The simulator's own `recovered` flag is authoritative. The legacy
- * payment-only heuristic is used ONLY for simulators that do not report it,
- * because for non-payment incidents (Redis, Users, Database) the payment
- * fields look healthy even while the incident is still active.
+ * Priority:
+ * 1. Simulator `recovered` + `activeScenario` (authoritative when present)
+ * 2. Named affected service health (from the incident being verified)
+ * 3. All reported service states
+ * 4. Generic status / errorRate fallback (never assumes Payment)
  */
-export function evaluateHealth(health: SimulatorHealth): boolean {
+export function evaluateHealth(
+  health: SimulatorHealth,
+  affectedService?: string,
+): boolean {
   if (typeof health.recovered === "boolean") {
     if (!health.recovered) return false;
     if (health.activeScenario) return false;
-    return true;
+  } else if (health.activeScenario) {
+    return false;
   }
 
-  if (health.activeScenario) return false;
+  const services = health.services ?? {};
+  if (affectedService) {
+    const matched = Object.entries(services).find(
+      ([name]) => name.toLowerCase() === affectedService.toLowerCase(),
+    );
+    if (matched) {
+      return String(matched[1]).toLowerCase() === "healthy";
+    }
+  }
 
-  const serviceStates = health.services
-    ? Object.values(health.services).map((value) => String(value).toLowerCase())
-    : [];
+  const serviceStates = Object.values(services).map((value) =>
+    String(value).toLowerCase(),
+  );
   if (serviceStates.length > 0) {
     return serviceStates.every((state) => state === "healthy");
   }
 
+  if (typeof health.recovered === "boolean") return health.recovered;
+
   return (
-    String(health.paymentService ?? "").toLowerCase() === "healthy" ||
     String(health.status ?? "").toLowerCase() === "healthy" ||
     (typeof health.errorRate === "number" && health.errorRate < 5)
   );

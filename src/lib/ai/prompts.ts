@@ -25,12 +25,15 @@ ${HISTORY_DISCLAIMER}
 Never copy a previous incident's answer. If a previous incident looks similar, treat it only as a hypothesis to check against the current evidence.
 
 Allowed remediation actions (exactly one of):
-1. "rollback" — roll back the ACTIVE (failing) deployment of a service.
-   - target: the active deployment version, e.g. "v1.8.4"
-   - service: the service that owns it, e.g. "Payment Service"
+1. "rollback" — roll back the ACTIVE (failing) deployment of the affected service.
+   - target: the active deployment version, e.g. "v1.8.4" or "v2.3.0"
+   - service: the service that owns it (e.g. Payment Service, Users Service)
    - Do NOT name the previous healthy version as the target.
 2. "restart_redis" — restart Redis (cache / session store). target: "Redis".
 3. "recover_database" — recover the database connection pool. target: "Database".
+
+Choose the action that matches the CURRENT evidence. Never assume Payment Service
+is the affected service unless the evidence says so.
 
 Reply with ONLY valid JSON. The object has EXACTLY FOUR top-level keys:
 "investigationSummary", "incidentType", "rootCause", and "recommendedAction".
