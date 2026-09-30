@@ -59,6 +59,9 @@ const defaultDependencies = (incident: Incident): AgentDependencies => ({
   callModel: async (messages) =>
     (await callDeepSeek({ messages, jsonMode: true })).content,
   onProgress: (steps) => {
+    // Progress polling is nice-to-have; skip DB chatter during the hot path
+    // on Vercel so DeepSeek isn't blocked behind many Supabase round-trips.
+    if (process.env.VERCEL === "1") return;
     enqueueProgress(incident.id, steps);
   },
 });
@@ -258,17 +261,23 @@ async function writeSteps(incidentId: string, steps: InvestigationStep[]) {
   });
 }
 
-/** Serialize progress writes so a slow "running" update cannot overwrite "completed". */
+/** Serialize + coalesce progress writes (latest steps win; avoids DB spam). */
 const progressQueues = new Map<string, Promise<void>>();
+const pendingSteps = new Map<string, InvestigationStep[]>();
 
 function enqueueProgress(
   incidentId: string,
   steps: InvestigationStep[],
 ): void {
+  // Keep only the newest snapshot; drop intermediate writes that haven't started.
+  pendingSteps.set(incidentId, steps);
   const previous = progressQueues.get(incidentId) ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(() => writeSteps(incidentId, steps));
+  const next = previous.catch(() => undefined).then(async () => {
+    const latest = pendingSteps.get(incidentId);
+    if (!latest) return;
+    pendingSteps.delete(incidentId);
+    await writeSteps(incidentId, latest);
+  });
   progressQueues.set(
     incidentId,
     next.finally(() => {

@@ -242,7 +242,7 @@ export function IncidentDetailClient({
       return [
         {
           key: "waiting",
-          label: "OpsPilot is investigating…",
+          label: "Collecting evidence and calling DeepSeek…",
           done: false,
           running: true,
         },

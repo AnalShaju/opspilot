@@ -25,7 +25,18 @@ function getBaseUrl(): string {
       500,
     );
   }
-  return url.replace(/\/$/, "");
+  const base = url.replace(/\/$/, "");
+  // Vercel (and other hosts) cannot reach the developer's laptop.
+  if (
+    process.env.VERCEL === "1" &&
+    /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/i.test(base)
+  ) {
+    throw new SimulatorError(
+      "SIMULATOR_URL is set to localhost on Vercel. Deploy the simulator and set SIMULATOR_URL to its public https URL.",
+      500,
+    );
+  }
+  return base;
 }
 
 async function request<T>(
