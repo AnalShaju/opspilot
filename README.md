@@ -6,6 +6,8 @@ Hackathon app: frontend + backend + DeepSeek incident agent.
 
 The production **simulator is a separate project**. This app talks to it over HTTP.
 
+![OpsPilot screenshot](public/opspilot_image_1.png)
+
 ## Architecture
 
 ```
