@@ -1,5 +1,7 @@
 # OpsPilot — AI Incident Commander
 
+We built this during a hackathon. It is a hackathon project.
+
 Hackathon app: frontend + backend + DeepSeek incident agent.
 
 The production **simulator is a separate project**. This app talks to it over HTTP.
@@ -70,15 +72,15 @@ Open http://localhost:3000
 
 ## API
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/incidents/sync` | Sync open simulator incidents into OpsPilot |
-| POST | `/api/demo/bootstrap` | Compat alias for sync (returns primary active incident) |
-| GET/POST | `/api/incidents` | List / create |
-| GET | `/api/incidents/:id` | Get one |
-| POST | `/api/incidents/:id/investigate` | Collect evidence + one DeepSeek diagnosis |
-| POST | `/api/incidents/:id/approve` | Human approval → remediate → verify |
-| GET | `/api/incidents/:id/report` | Structured report |
+| Method   | Path                             | Purpose                                                 |
+| -------- | -------------------------------- | ------------------------------------------------------- |
+| POST     | `/api/incidents/sync`            | Sync open simulator incidents into OpsPilot             |
+| POST     | `/api/demo/bootstrap`            | Compat alias for sync (returns primary active incident) |
+| GET/POST | `/api/incidents`                 | List / create                                           |
+| GET      | `/api/incidents/:id`             | Get one                                                 |
+| POST     | `/api/incidents/:id/investigate` | Collect evidence + one DeepSeek diagnosis               |
+| POST     | `/api/incidents/:id/approve`     | Human approval → remediate → verify                     |
+| GET      | `/api/incidents/:id/report`      | Structured report                                       |
 
 ## Evidence tools (backend-only)
 
