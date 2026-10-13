@@ -10,22 +10,29 @@ The production **simulator is a separate project**. This app talks to it over HT
 
 ## Architecture
 
-```
-Frontend
-   ↓
-Next.js API (/api/incidents/...)
-   ↓
-Incident Service
-   ↓
-Evidence collection (simulator HTTP APIs)
-   ↓
-ONE DeepSeek diagnosis call
-   ↓
-Human approval
-   ↓
-Backend remediation + health verification
-   ↓
-Supabase / in-memory history
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'background':'#0d0d0d','primaryColor':'#2a2a2a','primaryTextColor':'#f2f2f2','primaryBorderColor':'#8a8a8a','lineColor':'#9a9a9a','secondaryColor':'#1a1a1a','tertiaryColor':'#0d0d0d','clusterBkg':'#161616','clusterBorder':'#555555','fontFamily':'monospace'}}}%%
+flowchart TB
+    FE["Frontend"] --> API["Next.js API"]
+    API --> IS(["Incident Service"])
+    IS --> EV{{"Evidence<br/>collection"}}
+    EV --> LLM{{"DeepSeek<br/>ONE call"}}
+    LLM --> HA{"Human<br/>approval"}
+    HA -->|"approved"| REM(["Remediate<br/>+ verify health"])
+    REM --> DB[("Supabase /<br/>in-memory")]
+
+    SIM[["Simulator<br/>HTTP APIs"]]
+    EV -.->|"read"| SIM
+    REM -.->|"act + health"| SIM
+
+    classDef box fill:#2a2a2a,stroke:#9a9a9a,color:#f2f2f2,stroke-width:1.5px;
+    classDef dark fill:#000000,stroke:#9a9a9a,color:#f2f2f2,stroke-width:1.5px;
+    classDef gate fill:#4a4a4a,stroke:#ffffff,color:#ffffff,stroke-width:2px;
+    class FE,API box;
+    class IS,REM dark;
+    class EV,LLM,SIM box;
+    class HA gate;
+    class DB dark;
 ```
 
 Human approval is required before any remediation. DeepSeek never executes actions.
